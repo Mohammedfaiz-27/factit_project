@@ -1,0 +1,586 @@
+/* Minimal Neon Gradient Theme - White Background */
+:root {
+  /* Neon Gradient Colors */
+  --gradient-blue: #3B82F6;
+  --gradient-purple: #A855F7;
+  --gradient-pink: #EC4899;
+
+  /* Gradient Definitions */
+  --gradient-primary: linear-gradient(135deg, var(--gradient-blue), var(--gradient-purple));
+  --gradient-full: linear-gradient(135deg, var(--gradient-blue), var(--gradient-purple), var(--gradient-pink));
+  --gradient-text: linear-gradient(135deg, var(--gradient-blue) 0%, var(--gradient-purple) 50%, var(--gradient-pink) 100%);
+
+  /* Base Colors */
+  --background: #FFFFFF;
+  --surface: #FFFFFF;
+  --text-primary: #1F2937;
+  --text-secondary: #31343c;
+  --border: #E5E7EB;
+
+  /* Status Colors */
+  --success: #10B981;
+  --error: #EF4444;
+  --warning: #F59E0B;
+
+  /* Shadows */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow: 0 2px 4px rgba(0, 0, 0, 0.06);
+  --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.08);
+  --shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.1);
+
+  /* Neon Glow */
+  --glow-blue: 0 0 20px rgba(59, 130, 246, 0.3);
+  --glow-purple: 0 0 20px rgba(168, 85, 247, 0.3);
+  --glow-gradient: 0 0 30px rgba(147, 112, 219, 0.4);
+}
+
+body {
+  background: var(--background);
+  color: var(--text-primary);
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  margin: 0;
+  min-height: 100vh;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* App Header */
+.app-header {
+  text-align: center;
+  margin-bottom: 24px;
+}
+
+.app-title {
+  font-size: 36px;
+  font-weight: 700;
+  background: var(--gradient-text);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  margin: 0 0 8px 0;
+  letter-spacing: -0.5px;
+}
+
+.app-subtitle {
+  font-size: 16px;
+  font-weight: 400;
+  color: var(--text-secondary);
+  margin: 0;
+}
+
+/* Main Container */
+.container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  padding: 48px 24px;
+  gap: 32px;
+  max-width: 1200px;
+  margin: 0 auto;
+  min-height: 100vh;
+}
+
+/* Input Fields */
+input[type="text"] {
+  padding: 12px 16px;
+  border-radius: 12px;
+  border: 2px solid var(--border);
+  background: var(--surface);
+  color: var(--text-primary);
+  outline: none;
+  font-size: 15px;
+  font-family: inherit;
+  width: 100%;
+  max-width: 500px;
+  box-sizing: border-box;
+  transition: all 0.3s ease;
+}
+
+input[type="text"]:hover {
+  border-image: var(--gradient-full) 1;
+  border-style: solid;
+}
+
+input[type="text"]:focus {
+  border-image: var(--gradient-full) 1;
+  border-style: solid;
+  box-shadow: var(--glow-gradient);
+}
+
+/* Buttons */
+button {
+  background: var(--gradient-primary);
+  border: none;
+  color: white;
+  padding: 12px 24px;
+  font-size: 15px;
+  font-weight: 500;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: inherit;
+  box-shadow: var(--shadow);
+}
+
+button:hover {
+  box-shadow: var(--glow-gradient), var(--shadow-md);
+  transform: translateY(-2px);
+}
+
+button:active {
+  transform: translateY(0);
+  box-shadow: var(--shadow);
+}
+
+/* Result Card */
+.result {
+  background: #f7f8fa;
+  padding: 32px;
+  border-radius: 16px;
+  border: 2px solid transparent;
+  background-image: linear-gradient(#f7f8fa, #f7f8fa), var(--gradient-full);
+  background-origin: border-box;
+  background-clip: padding-box, border-box;
+  box-shadow: var(--shadow-md), inset 0 2px 4px rgba(0, 0, 0, 0.03);
+  max-width: 800px;
+  width: 100%;
+  margin-top: 16px;
+}
+
+.result h2 {
+  margin: 0 0 24px 0;
+  background: var(--gradient-text);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  font-size: 24px;
+  font-weight: 600;
+  text-align: center;
+}
+
+/* Result Section */
+.result-section {
+  margin-bottom: 20px;
+  padding: 16px;
+  background: rgba(255, 255, 255, 0.7);
+  border-radius: 12px;
+  border-left: 3px solid;
+  border-image: var(--gradient-primary) 1;
+}
+
+.result-section strong {
+  display: block;
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.result-section p {
+  margin: 0;
+  line-height: 1.7;
+  color: var(--text-primary);
+  font-size: 15px;
+}
+
+/* Cache Note */
+.result-section.cache-note {
+  background: rgba(22, 163, 74, 0.1);
+  border-left-color: var(--success);
+  text-align: center;
+}
+
+.result-section.cache-note small {
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+/* Status Display */
+.result-section .status {
+  font-size: 20px;
+  font-weight: 600;
+  margin: 0;
+  padding: 12px 16px;
+  background: var(--background);
+  border-radius: 8px;
+  text-align: center;
+  border: 1px solid var(--border);
+}
+
+/* Lists */
+.result-section ul {
+  margin: 12px 0 0 0;
+  padding-left: 24px;
+  list-style-type: none;
+}
+
+.result-section ul li {
+  margin-bottom: 10px;
+  padding-left: 20px;
+  position: relative;
+  line-height: 1.6;
+  color: var(--text-primary);
+}
+
+.result-section ul li:before {
+  content: "•";
+  position: absolute;
+  left: 0;
+  color: var(--primary);
+  font-weight: bold;
+  font-size: 18px;
+}
+
+/* Input Text Specific Class */
+.input-text {
+  padding: 12px 16px;
+  border-radius: 12px;
+  border: 2px solid var(--border);
+  background: var(--surface);
+  color: var(--text-primary);
+  outline: none;
+  font-size: 15px;
+  font-family: inherit;
+  width: 100%;
+  max-width: 500px;
+  box-sizing: border-box;
+  transition: all 0.3s ease;
+}
+
+.input-text:hover {
+  border-image: var(--gradient-full) 1;
+  border-style: solid;
+}
+
+.input-text:focus {
+  border-image: var(--gradient-full) 1;
+  border-style: solid;
+  box-shadow: var(--glow-gradient);
+}
+
+/* Multimodal Input Card */
+.fact-checker-input {
+  width: 100%;
+  max-width: 700px;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  padding: 32px;
+  background: #f7f8fa;
+  border-radius: 16px;
+  border: 2px solid transparent;
+  background-image: linear-gradient(#f7f8fa, #f7f8fa), var(--gradient-full);
+  background-origin: border-box;
+  background-clip: padding-box, border-box;
+  box-shadow: var(--shadow-md), inset 0 2px 4px rgba(0, 0, 0, 0.03);
+}
+
+/* Mode Selector */
+.input-mode-selector {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  flex-wrap: wrap;
+  padding: 4px;
+  background: rgba(222, 220, 228, 0.6);
+  border-radius: 10px;
+}
+
+/* Mode Buttons */
+.mode-btn {
+  padding: 10px 20px;
+  font-size: 14px;
+  background: transparent;
+  border: 2px solid transparent;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  color: var(--text-secondary);
+  font-weight: 500;
+  font-family: inherit;
+}
+
+.mode-btn:hover {
+  border: 2px solid transparent;
+  background-image: linear-gradient(white, white), var(--gradient-full);
+  background-origin: border-box;
+  background-clip: padding-box, border-box;
+  color: var(--text-primary);
+}
+
+.mode-btn.active {
+  background: var(--gradient-primary);
+  color: white;
+  box-shadow: var(--glow-gradient);
+  border: none;
+}
+
+/* File and Voice Input Wrappers */
+.file-input-wrapper,
+.voice-input-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  align-items: center;
+  width: 100%;
+}
+
+/* File Input */
+.file-input {
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.6);
+  border: 2px dashed var(--border);
+  border-radius: 12px;
+  cursor: pointer;
+  color: var(--text-primary);
+  width: 100%;
+  max-width: 500px;
+  font-family: inherit;
+  transition: all 0.3s ease;
+}
+
+.file-input:hover {
+  border-style: dashed;
+  border-width: 2px;
+  border-image: var(--gradient-full) 1;
+  background: var(--surface);
+}
+
+.file-input::-webkit-file-upload-button {
+  background: var(--gradient-primary);
+  color: white;
+  padding: 8px 16px;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  margin-right: 12px;
+  font-family: inherit;
+  font-weight: 500;
+  transition: all 0.3s ease;
+}
+
+.file-input::-webkit-file-upload-button:hover {
+  box-shadow: var(--glow-gradient);
+}
+
+/* File Name Display */
+.file-name {
+  padding: 10px 16px;
+  background: rgba(255, 255, 255, 0.8);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 14px;
+  color: var(--text-primary);
+  max-width: 500px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Recording Buttons */
+.record-btn {
+  background-color: var(--success);
+  padding: 12px 24px;
+  font-size: 15px;
+  font-weight: 500;
+}
+
+.record-btn:hover {
+  background-color: #15803D;
+  box-shadow: 0 4px 6px var(--shadow-md);
+}
+
+.stop-btn {
+  background-color: var(--error);
+  padding: 12px 24px;
+  font-size: 15px;
+  font-weight: 500;
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.8;
+  }
+}
+
+.stop-btn:hover {
+  background-color: #B91C1C;
+  box-shadow: 0 4px 6px var(--shadow-md);
+}
+
+/* Submit Button */
+.submit-btn {
+  background-color: var(--primary);
+  padding: 14px 32px;
+  font-size: 16px;
+  font-weight: 600;
+  margin-top: 8px;
+  width: 100%;
+  max-width: 300px;
+}
+
+.submit-btn:disabled {
+  background-color: var(--border);
+  color: var(--text-secondary);
+  cursor: not-allowed;
+  opacity: 0.6;
+  box-shadow: none;
+}
+
+.submit-btn:not(:disabled):hover {
+  background-color: var(--primary-hover);
+  box-shadow: 0 4px 8px var(--shadow-md);
+  transform: translateY(-2px);
+}
+
+/* Error Message */
+.error-message {
+  color: var(--error);
+  background: rgba(220, 38, 38, 0.1);
+  padding: 14px 16px;
+  border-radius: 8px;
+  border: 1px solid var(--error);
+  font-size: 14px;
+  margin-top: 12px;
+  width: 100%;
+  max-width: 500px;
+  text-align: center;
+}
+
+/* Form Styles */
+form {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  width: 100%;
+}
+
+/* Loading Animation Styles */
+.loading-container {
+  width: 100%;
+  max-width: 700px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 48px 32px;
+  background: #f7f8fa;
+  border-radius: 16px;
+  border: 2px solid transparent;
+  background-image: linear-gradient(#f7f8fa, #f7f8fa), var(--gradient-full);
+  background-origin: border-box;
+  background-clip: padding-box, border-box;
+  box-shadow: var(--shadow-md), inset 0 2px 4px rgba(0, 0, 0, 0.03);
+  margin-top: 16px;
+}
+
+.loading-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 32px;
+  width: 100%;
+}
+
+/* Spinner */
+.spinner-container {
+  position: relative;
+  width: 80px;
+  height: 80px;
+}
+
+.spinner {
+  width: 100%;
+  height: 100%;
+  position: relative;
+}
+
+.spinner-circle {
+  width: 100%;
+  height: 100%;
+  border: 4px solid var(--border);
+  border-top: 4px solid var(--gradient-blue);
+  border-right: 4px solid var(--gradient-purple);
+  border-radius: 50%;
+  box-shadow: var(--glow-gradient);
+}
+
+/* Loading Text */
+.loading-text-container {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.loading-text {
+  font-size: 18px;
+  font-weight: 600;
+  background: var(--gradient-text);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  margin: 0;
+}
+
+.loading-dots {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.dot {
+  font-size: 24px;
+  background: var(--gradient-text);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  line-height: 1;
+}
+
+/* Loading Steps */
+.loading-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  width: 100%;
+  max-width: 400px;
+  margin-top: 16px;
+}
+
+.loading-step {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  background: rgba(255, 255, 255, 0.7);
+  border-radius: 8px;
+  border: 1px solid var(--border);
+}
+
+.step-indicator {
+  width: 10px;
+  height: 10px;
+  background: var(--gradient-primary);
+  border-radius: 50%;
+  flex-shrink: 0;
+  box-shadow: var(--glow-gradient);
+}
+
+.step-text {
+  font-size: 14px;
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+

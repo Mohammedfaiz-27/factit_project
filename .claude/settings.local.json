@@ -1,0 +1,31 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm run lint)",
+      "Bash(npm run:*)",
+      "Bash(python -m flake8:*)",
+      "Bash(python:*)",
+      "Bash(npm start)",
+      "Bash(netstat:*)",
+      "Bash(findstr:*)",
+      "Bash(taskkill:*)",
+      "Bash(dir:*)",
+      "Bash(python3:*)",
+      "WebSearch",
+      "Bash(where:*)",
+      "Bash(py:*)",
+      "Bash(ren:*)",
+      "Bash(mv:*)",
+      "Bash(timeout:*)",
+      "Bash(del IMPLEMENTATION_SUMMARY.md TESTING_GUIDE.md)",
+      "Bash(curl:*)",
+      "Bash(test:*)",
+      "Bash(del test_url_debug.py test_url_real.py test_url_simple.py)",
+      "Bash(npm install:*)",
+      "Bash(nul)",
+      "Bash(pip install:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
