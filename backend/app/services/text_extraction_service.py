@@ -21,6 +21,44 @@ class TextExtractionService:
         self.client = genai.Client(api_key=GEMINI_API_KEY)
         self.model = GEMINI_MODEL
 
+    def _call_with_retry(self, func, max_retries: int = 3):
+        """
+        Call a function with retry logic for 503 overload errors.
+
+        Args:
+            func: Function to call (should return the response)
+            max_retries: Maximum number of retry attempts
+
+        Returns:
+            The function result
+
+        Raises:
+            Exception if all retries fail
+        """
+        last_error = None
+        for attempt in range(max_retries):
+            try:
+                return func()
+            except Exception as e:
+                last_error = e
+                error_msg = str(e)
+
+                # Check for 503 overload error
+                if "503" in error_msg or "UNAVAILABLE" in error_msg or "overload" in error_msg.lower():
+                    if attempt < max_retries - 1:
+                        wait_time = 2 ** (attempt + 1)  # 2, 4, 8 seconds
+                        print(f"[RETRY] Gemini API overloaded (attempt {attempt + 1}/{max_retries}). Waiting {wait_time}s...")
+                        time.sleep(wait_time)
+                        continue
+                    else:
+                        print(f"[ERROR] Gemini API still overloaded after {max_retries} attempts")
+                else:
+                    # Non-retriable error, raise immediately
+                    raise
+
+        # All retries failed
+        raise last_error
+
     def extract_text_from_image(self, file_content: bytes, filename: str) -> dict:
         """
         Extract text from image using OCR (Gemini Vision).
@@ -40,10 +78,9 @@ class TextExtractionService:
                 temp_file.write(file_content)
                 temp_file_path = temp_file.name
 
-            # Use Gemini Vision for OCR
+            # Use Gemini Vision for OCR with retry logic
             print(f"Extracting text from image: {filename}")
             image = Image.open(temp_file_path)
-            chat = self.client.chats.create(model=self.model)
 
             ocr_prompt = """
 Extract all visible text from this image. Include:
@@ -58,7 +95,11 @@ TEXT CONTENT: [extracted text or "No text found"]
 VISUAL CONTEXT: [brief description of relevant visual elements]
 """
 
-            response = chat.send_message([ocr_prompt, image])
+            def make_ocr_call():
+                chat = self.client.chats.create(model=self.model)
+                return chat.send_message([ocr_prompt, image])
+
+            response = self._call_with_retry(make_ocr_call)
             extracted_text = response.text.strip()
 
             print(f"Text extracted successfully from image")
@@ -121,8 +162,7 @@ VISUAL CONTEXT: [brief description of relevant visual elements]
 
             print("Video is now ACTIVE. Extracting text...")
 
-            # Extract text using Gemini
-            chat = self.client.chats.create(model=self.model)
+            # Extract text using Gemini with retry logic
             extraction_prompt = """
 Analyze this video and extract:
 1. TRANSCRIPT: All spoken words and dialogue
@@ -135,7 +175,11 @@ VISUAL TEXT: [visible text or "No text visible"]
 KEY CLAIMS: [main claims to fact-check]
 """
 
-            response = chat.send_message([extraction_prompt, uploaded_file])
+            def make_extraction_call():
+                chat = self.client.chats.create(model=self.model)
+                return chat.send_message([extraction_prompt, uploaded_file])
+
+            response = self._call_with_retry(make_extraction_call)
             extracted_text = response.text.strip()
 
             print("Text extracted successfully from video")
@@ -233,8 +277,7 @@ KEY CLAIMS: [main claims to fact-check]
 
             print("Audio is now ACTIVE. Transcribing...")
 
-            # Transcribe using Gemini
-            chat = self.client.chats.create(model=self.model)
+            # Transcribe using Gemini with retry logic
             transcription_prompt = """
 Transcribe this audio and extract:
 1. FULL TRANSCRIPT: Complete transcription of all spoken words
@@ -247,7 +290,11 @@ KEY CLAIMS: [main claims to fact-check]
 CONTEXT: [relevant context]
 """
 
-            response = chat.send_message([transcription_prompt, uploaded_file])
+            def make_transcription_call():
+                chat = self.client.chats.create(model=self.model)
+                return chat.send_message([transcription_prompt, uploaded_file])
+
+            response = self._call_with_retry(make_transcription_call)
             extracted_text = response.text.strip()
 
             print("Text extracted successfully from audio")

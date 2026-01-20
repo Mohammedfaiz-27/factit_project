@@ -137,10 +137,30 @@ KEY FINDINGS:
 CREDIBLE SOURCES:
 {sources_text}
 
-Determine the verdict:
-- ✅ True: Supported by credible sources
-- ❌ False: Disproven or unsupported by credible sources
-- ⚠️ Unverified: Conflicting or insufficient information
+Determine the verdict based on these STRICT criteria:
+
+✅ TRUE - ONLY use when:
+- Credible sources explicitly CONFIRM the claim with direct evidence
+- Example: Claim "X won election" → Sources report "X won election" = TRUE
+
+❌ FALSE - ONLY use when:
+- Credible sources explicitly CONTRADICT the claim with direct evidence
+- There must be POSITIVE EVIDENCE that the opposite is true
+- Example: Claim "X won election" → Sources report "Y won election" = FALSE
+- NEVER mark as FALSE just because "no sources found" or "no coverage exists"
+
+⚠️ UNVERIFIED - Use for ALL of these situations:
+- No credible sources cover the topic at all
+- Sources discuss related topics but don't confirm or deny the specific claim
+- "No reports found" or "unable to verify" = UNVERIFIED (not FALSE)
+- Local events not covered by major media = UNVERIFIED (not FALSE)
+- Only partial information available = UNVERIFIED
+
+CRITICAL RULES:
+1. "No sources confirm X" does NOT mean X is false - it means UNVERIFIED
+2. "No reports found about X" = UNVERIFIED, never FALSE
+3. To mark FALSE, you MUST have evidence proving the OPPOSITE is true
+4. When in doubt, choose UNVERIFIED over FALSE
 
 Provide:
 1. STATUS: One of [✅ True, ❌ False, ⚠️ Unverified]

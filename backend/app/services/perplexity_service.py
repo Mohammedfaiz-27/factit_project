@@ -47,7 +47,7 @@ class PerplexityService:
             entities_text = ', '.join(entities) if entities else 'N/A'
 
             research_prompt = f"""
-You are a professional fact-checker. Research the following claim using only credible sources (Reuters, BBC, AP News, official government portals, scientific journals).
+You are a professional fact-checker. Research the following claim using only credible sources (Reuters, BBC, AP News, PTI, The Hindu, Times of India, NDTV, India Today, official government portals, PIB India, scientific journals).
 
 Claim: {claim}
 
@@ -79,7 +79,7 @@ SOURCES:
                 "messages": [
                     {
                         "role": "system",
-                        "content": "You are a professional fact-checking assistant with access to real-time information. Only cite credible sources."
+                        "content": "You are a professional fact-checking assistant with access to real-time information. Cite credible sources including international (Reuters, BBC, AP) and regional sources (PTI, The Hindu, Times of India, government portals)."
                     },
                     {
                         "role": "user",
@@ -90,6 +90,7 @@ SOURCES:
                 "max_tokens": 2000
             }
 
+            print(f"[Perplexity] Making API request for: {search_query[:50]}...")
             response = requests.post(
                 self.base_url,
                 headers=headers,
@@ -97,15 +98,27 @@ SOURCES:
                 timeout=30
             )
 
+            print(f"[Perplexity] Response status: {response.status_code}")
+
             if response.status_code == 200:
                 result = response.json()
                 research_text = result['choices'][0]['message']['content']
+                print(f"[Perplexity] Got response ({len(research_text)} chars)")
+                print(f"[Perplexity] First 500 chars: {research_text[:500]}")
 
                 # Parse the response
                 parsed_result = self._parse_research_response(research_text)
+                print(f"[Perplexity] Parsed: {len(parsed_result.get('findings', []))} findings, {len(parsed_result.get('sources', []))} sources")
+
+                # Debug: if parsing failed, show why
+                if len(parsed_result.get('findings', [])) == 0:
+                    print(f"[Perplexity] DEBUG - Has SUMMARY: {'SUMMARY:' in research_text}")
+                    print(f"[Perplexity] DEBUG - Has FINDINGS: {'FINDINGS:' in research_text}")
+                    print(f"[Perplexity] DEBUG - Has bullet (-): {'-' in research_text}")
+
                 return parsed_result
             else:
-                print(f"Perplexity API error: {response.status_code} - {response.text}")
+                print(f"[Perplexity] API error: {response.status_code} - {response.text}")
                 return self._fallback_research(search_query)
 
         except requests.exceptions.Timeout:
@@ -135,21 +148,27 @@ SOURCES:
 
         for line in lines:
             line = line.strip()
+            # Remove markdown bold formatting (**text** -> text)
+            clean_line = line.replace("**", "")
 
-            if line.startswith("SUMMARY:"):
+            if clean_line.startswith("SUMMARY:"):
                 current_section = "summary"
-                summary = line.replace("SUMMARY:", "").strip()
-            elif line.startswith("FINDINGS:"):
+                summary = clean_line.replace("SUMMARY:", "").strip()
+            elif clean_line.startswith("FINDINGS:"):
                 current_section = "findings"
-            elif line.startswith("SOURCES:"):
+            elif clean_line.startswith("SOURCES:"):
                 current_section = "sources"
-            elif line.startswith("-") or line.startswith("•"):
-                content = line.lstrip("-•").strip()
+            elif line.startswith("-") or line.startswith("•") or line.startswith("*"):
+                # Handle bullet points (-, •, or * for markdown lists)
+                content = line.lstrip("-•*").strip()
+                # Also remove any leading ** from bold bullets
+                if content.startswith("**"):
+                    content = content[2:]
                 if current_section == "findings" and content:
                     findings.append(content)
                 elif current_section == "sources" and content:
                     sources.append(content)
-            elif current_section == "summary" and line:
+            elif current_section == "summary" and line and not clean_line.startswith("Verdict"):
                 summary += " " + line
 
         return {

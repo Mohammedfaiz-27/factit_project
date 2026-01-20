@@ -151,6 +151,41 @@ Now convert this user input:
             "original_input": claim_text
         }
 
+    def translate_to_english(self, text: str) -> str:
+        """
+        Translate non-English text to English for better search results.
+
+        Args:
+            text (str): Text that may be in any language
+
+        Returns:
+            str: English translation or original text if already English
+        """
+        try:
+            # Check if text contains non-ASCII characters (likely non-English)
+            if all(ord(char) < 128 for char in text.replace(' ', '').replace('\n', '')):
+                return text  # Already English/ASCII
+
+            chat = self.client.chats.create(model=self.model)
+
+            translate_prompt = f"""Translate the following text to English. If it's already in English, return it as-is.
+Only output the translation, nothing else.
+
+Text: {text}"""
+
+            response = chat.send_message(translate_prompt)
+            translated = response.text.strip()
+
+            # Remove quotes if present
+            if translated.startswith('"') and translated.endswith('"'):
+                translated = translated[1:-1]
+
+            return translated
+
+        except Exception as e:
+            print(f"Translation error: {e}")
+            return text  # Return original on error
+
     def create_search_query(self, structured_claim: dict) -> str:
         """
         Create an optimized search query from structured claim.
@@ -159,7 +194,7 @@ Now convert this user input:
             structured_claim (dict): Structured claim data with new schema
 
         Returns:
-            str: Optimized search query for Perplexity
+            str: Optimized search query for Perplexity (in English for better results)
         """
         # Extract components from new schema
         claim = structured_claim.get("claim", "")
@@ -196,4 +231,7 @@ Now convert this user input:
         if not search_query.strip():
             search_query = structured_claim.get("original_input", "")[:200]
 
-        return search_query.strip()
+        # Translate to English for better Perplexity search results
+        search_query = self.translate_to_english(search_query.strip())
+
+        return search_query

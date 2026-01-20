@@ -23,7 +23,13 @@
       "Bash(del test_url_debug.py test_url_real.py test_url_simple.py)",
       "Bash(npm install:*)",
       "Bash(nul)",
-      "Bash(pip install:*)"
+      "Bash(pip install:*)",
+      "Bash(nslookup:*)",
+      "Bash(ping:*)",
+      "Bash(cmd /c \"python -c \"\"import socket; print\\(''Perplexity:'', socket.gethostbyname\\(''api.perplexity.ai''\\)\\); print\\(''Google:'', socket.gethostbyname\\(''generativelanguage.googleapis.com''\\)\\)\"\"\")",
+      "Bash(cmd /c \"python -c \"\"import socket; print\\(socket.gethostbyname\\(''api.perplexity.ai''\\)\\)\"\"\")",
+      "Bash(del \"F:\\\\newsit\\\\fact_checker_project\\\\backend\\\\test_network.py\")",
+      "Bash(cmd /c \"echo. > F:\\\\newsit\\\\fact_checker_project\\\\backend\\\\test_perplexity.py\")"
     ],
     "deny": [],
     "ask": []
