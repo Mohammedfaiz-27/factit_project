@@ -7,11 +7,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 A professional multimodal fact-checking application that uses:
 - **Google Gemini AI** (gemini-2.0-flash) for claim structuring and verdict generation
 - **Perplexity AI** for deep research and source verification
+- **X (Twitter) Analysis** for supplementary external source discovery
 - **React 19** frontend with glassmorphism design
 - **FastAPI** backend with layered architecture
 - **MongoDB** for caching and persistence
 
-The system implements an 8-step professional fact-checking pipeline with input/output moderation, database caching, LLM structuring, and credible source verification.
+The system implements an 8-step professional fact-checking pipeline with input/output moderation, database caching, LLM structuring, credible source verification, and X analysis for supplementary context.
 
 ## Development Commands
 
@@ -38,6 +39,7 @@ npm test                                 # Run tests
 - Create `backend/.env` from `backend/.env.example` and configure:
   - `GEMINI_API_KEY` (required) - for claim structuring and verdict generation
   - `PERPLEXITY_API_KEY` (optional but recommended) - for deep research with credible sources
+  - `X_BEARER_TOKEN` (optional) - for X (Twitter) analysis to discover additional sources
   - `MONGO_URI` (optional) - defaults to `mongodb://localhost:27017/factchecker_db`
 
 ## Architecture
@@ -54,15 +56,17 @@ The backend follows a clean layered architecture with professional fact-checking
 2. **Service Layer** - Multiple specialized services:
 
    **a) ProfessionalFactCheckService** (`app/services/professional_fact_check_service.py`):
-   - **8-Step Pipeline**:
-     1. Input Moderation - checks for harmful/illegal/private content
-     2. Database Cache Check - returns cached results if claim exists (SHA256 hash lookup)
-     3. LLM Structuring - converts unstructured input to standardized schema
-     4. Perplexity Deep Research - queries credible sources (Reuters, BBC, etc.)
-     5. Generate Final Result - creates verdict (✅ True, ❌ False, ⚠️ Unverified)
-     6. Output Moderation - ensures safe, factual, neutral output
-     7. Database Storage - saves structured data, research, verdict with timestamp
-     8. Return Response - formatted human-readable result
+   - **6-Step Pipeline** (unchanged structure, enhanced research):
+     1. Database Cache Check - returns cached results if claim exists (SHA256 hash lookup)
+     2. LLM Structuring - converts unstructured input to standardized schema
+     3. Research Phase - **Parallel execution** of:
+        - Perplexity Deep Research (PRIMARY) - queries credible sources (Reuters, BBC, etc.)
+        - X Analysis (SUPPLEMENTARY) - extracts external links from X posts
+     4. Generate Final Result - Gemini creates verdict using combined research context
+        - Perplexity findings weighted HIGH
+        - X-linked sources weighted LOW (supplementary only)
+     5. Database Storage - saves structured data, research, verdict with timestamp
+     6. Return Response - formatted result including `x_analysis` field
 
    **b) ModerationService** (`app/services/moderation_service.py`):
    - Input moderation using regex patterns + Gemini AI
@@ -93,7 +97,17 @@ The backend follows a clean layered architecture with professional fact-checking
    - Parses summary, findings, and sources from responses
    - Includes fallback when API key not configured
 
-   **e) FactCheckService** (`app/services/fact_check_service.py`):
+   **e) XAnalysisService** (`app/services/x_analysis_service.py`):
+   - Analyzes X (Twitter) for posts discussing the claim
+   - **Runs in parallel** with Perplexity Deep Search during Step 3
+   - Extracts only **external links** from posts (news articles, government portals, official sources)
+   - X is **never treated as a source of truth**
+   - Categorizes sources by credibility tier (primary, secondary, unknown)
+   - Results passed to Gemini as **supplementary context** with low evidence weight
+   - Engagement metrics (likes, retweets) are **never** used as evidence
+   - Graceful fallback if X API unavailable - pipeline continues with Perplexity only
+
+   **f) FactCheckService** (`app/services/fact_check_service.py`):
    - Legacy multimodal service for images/videos/audio
    - **Media Processing Strategy**:
      - **Images**: Processed directly inline using PIL (no upload needed)
@@ -155,24 +169,46 @@ The backend follows a clean layered architecture with professional fact-checking
 ## Important Notes
 
 ### Professional Fact-Checking Pipeline
-- Text claims use the 8-step professional pipeline with Perplexity research
+- Text claims use the 6-step professional pipeline with parallel Perplexity + X research
 - All user inputs pass through structured prompt conversion as preprocessing step
 - Cache lookups use SHA256 hashing on normalized claims for instant results
-- Response format: `{claim_text, status, explanation, sources, research_summary, findings, structured_claim}`
+- Response format: `{claim_text, status, explanation, sources, research_summary, findings, structured_claim, x_analysis}`
 - `structured_claim` includes: `{claim, entities, time_period, context}` for transparency
+- `x_analysis` includes: `{posts_analyzed, external_sources_found, sources, discussion_summary, note}`
 - Status values: `✅ True`, `❌ False`, `⚠️ Unverified`, or `❌ Rejected` (moderation)
+
+### X (Twitter) Analysis Integration
+- **Purpose**: Surface additional external sources from X discussions, never opinions
+- **Execution**: Runs in parallel with Perplexity Deep Search (no added latency)
+- **Critical Rules**:
+  - X is **never** a source of truth
+  - Only external links (news, govt portals, official sources) are extracted
+  - Engagement metrics (likes, retweets) are **ignored completely**
+  - Virality/popularity is **never** treated as proof of accuracy
+- **Evidence Weighting**:
+  - Perplexity Deep Search = PRIMARY (high weight)
+  - X-linked external sources = SUPPLEMENTARY (low weight)
+- **Fallback**: If X API unavailable, pipeline continues with Perplexity only
+- **Configuration**:
+  - `X_BEARER_TOKEN` - Twitter API v2 bearer token
+  - `X_ANALYSIS_ENABLED` - Enable/disable (default: true)
+  - `X_SEARCH_LIMIT` - Max posts to analyze (default: 50)
 
 ### API Keys and Configuration
 - `GEMINI_API_KEY` is required; backend will raise `ValueError` if not set
 - `PERPLEXITY_API_KEY` is optional but recommended for deep research
   - Without it, system falls back to Gemini-only fact checking
   - Get key from: https://www.perplexity.ai/settings/api
+- `X_BEARER_TOKEN` is optional for X analysis
+  - Without it, X analysis returns fallback response and pipeline continues
+  - Get token from: https://developer.twitter.com/en/portal/dashboard
 - MongoDB is configured but the app can use in-memory storage if connection fails
 
 ### Performance and Timeouts
 - File processing has timeouts: 5 minutes for video/audio uploads
 - Audio conversion failures fall back to original format (may not work with Gemini)
-- Perplexity API calls timeout after 30 seconds
+- Perplexity API calls timeout after 60 seconds
+- X Analysis API calls timeout after 30 seconds (runs in parallel, no added latency)
 - Cache hits return instantly without API calls
 
 ### Security and Moderation
