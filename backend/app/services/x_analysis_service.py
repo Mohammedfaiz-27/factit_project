@@ -58,6 +58,17 @@ class XAnalysisService:
             "pti.in", "ani.in",
             # Fact-checkers
             "snopes.com", "factcheck.org", "politifact.com", "altnews.in",
+            # Regional Indian news — Tamil Nadu
+            "dinamalar.com", "dailythanthi.com", "dinamani.com", "maalaimalar.com",
+            "vikatan.com", "news7tamil.live", "puthiyathalaimurai.com",
+            "polimernews.com", "dtnext.in",
+            # Regional Indian news — other states & national
+            "news18.com", "aajtak.in", "dainikbhaskar.com",
+            "eenadu.net", "mathrubhumi.com", "manoramaonline.com",
+            "deccanherald.com", "deccanchronicle.com",
+            "newindianexpress.com", "oneindia.com",
+            "thequint.com", "scroll.in", "theprint.in",
+            "livemint.com", "business-standard.com",
         }
 
         if not self.bearer_token and self.enabled:
@@ -121,6 +132,8 @@ class XAnalysisService:
     def _build_x_search_query(self, structured_claim: dict, search_query: str) -> str:
         """
         Build an optimized search query for X API.
+        Uses top 2 entities for focus and does NOT restrict language,
+        since local Indian events are often discussed in regional languages.
 
         Args:
             structured_claim (dict): Structured claim data
@@ -132,24 +145,41 @@ class XAnalysisService:
         # Extract key entities for focused search
         entities = structured_claim.get("entities", [])
         claim = structured_claim.get("claim", search_query)
+        original_input = structured_claim.get("original_input", "")
+        geographic_scope = structured_claim.get("geographic_scope", "national")
 
         # Build query components
         query_parts = []
 
-        # Add main entities (limit to top 3 for relevance)
+        # Add main entities (limit to top 2 for broader matching)
         if entities:
-            entity_query = " ".join(entities[:3])
+            entity_query = " ".join(entities[:2])
             query_parts.append(entity_query)
         else:
-            # Use first 5 significant words from claim
-            words = [w for w in claim.split() if len(w) > 3][:5]
+            # Use first 4 significant words from claim
+            words = [w for w in claim.split() if len(w) > 3][:4]
             query_parts.append(" ".join(words))
 
         # Combine and add filter for posts with links
         base_query = " ".join(query_parts)
 
-        # X API search operators: has:links filters for posts with URLs
-        x_query = f"{base_query} has:links -is:retweet lang:en"
+        # For local/district claims with regional language input,
+        # extract key regional language terms for better X matching
+        if geographic_scope in ("local", "district") and original_input:
+            is_regional = any(ord(c) > 127 for c in original_input.replace(' ', ''))
+            if is_regional:
+                # Extract first few significant words from original language input
+                original_words = [w for w in original_input.split() if len(w) > 2][:3]
+                if original_words:
+                    regional_terms = " ".join(original_words)
+                    # Use regional terms as primary query (people tweet in their language)
+                    base_query = regional_terms
+
+        # X API search operators:
+        # - has:links filters for posts with URLs
+        # - -is:retweet excludes retweets
+        # - Do NOT add lang:en — local events are discussed in regional languages
+        x_query = f"{base_query} has:links -is:retweet"
 
         # Limit query length for API
         if len(x_query) > 500:

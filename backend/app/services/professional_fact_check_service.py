@@ -6,6 +6,7 @@ from app.services.x_analysis_service import XAnalysisService
 from google import genai
 from datetime import datetime
 import time
+import re
 import concurrent.futures
 
 
@@ -145,7 +146,24 @@ class ProfessionalFactCheckService:
                     "error": str(e)
                 }
 
-        print(f"[RESEARCH] Parallel research phase complete\n")
+        print(f"[RESEARCH] Parallel research phase complete")
+
+        # Retry with alternative query if Perplexity returned nothing useful
+        if not self._assess_perplexity_relevance(research_data):
+            alt_query = self.structuring.create_alternative_query(structured_claim)
+            if alt_query and alt_query != search_query:
+                print(f"[RESEARCH] Perplexity returned no findings. Retrying with alternative query...")
+                try:
+                    retry_data = self.perplexity.deep_research(alt_query, structured_claim)
+                    if self._assess_perplexity_relevance(retry_data):
+                        research_data = retry_data
+                        print(f"[RESEARCH] Retry successful — found relevant results")
+                    else:
+                        print(f"[RESEARCH] Retry also returned no findings")
+                except Exception as e:
+                    print(f"[RESEARCH] Retry failed: {str(e)}")
+
+        print(f"[RESEARCH] Research phase complete\n")
 
         return research_data, x_analysis_data
 
@@ -187,6 +205,44 @@ class ProfessionalFactCheckService:
                 # Build X analysis context (SUPPLEMENTARY)
                 x_context = self._build_x_analysis_context(x_analysis_data)
 
+                # Determine if Perplexity returned relevant results
+                perplexity_has_relevant = self._assess_perplexity_relevance(research_data)
+                x_has_sources = (
+                    x_analysis_data and
+                    x_analysis_data.get("has_relevant_posts", False) and
+                    len(x_analysis_data.get("external_sources", [])) > 0
+                )
+
+                # Dynamic evidence weighting
+                x_elevation_guidance = ""
+                if perplexity_has_relevant:
+                    perplexity_weight = "HIGH"
+                    x_weight = "LOW (supplementary)"
+                elif x_has_sources:
+                    # Perplexity failed but X found external sources — promote X
+                    perplexity_weight = "LOW (returned irrelevant or no results)"
+                    x_weight = "ELEVATED — primary evidence source for this claim (Perplexity research was inconclusive)"
+                    # Count credible X sources for stronger guidance
+                    credible_x_sources = [
+                        s for s in x_analysis_data.get("external_sources", [])
+                        if s.get("credibility_tier") in ("primary", "secondary")
+                    ]
+                    if credible_x_sources:
+                        x_elevation_guidance = f"""
+CRITICAL — X SOURCES AS PRIMARY EVIDENCE:
+Primary research (Perplexity) found NO relevant results for this claim, but X analysis
+found {len(credible_x_sources)} credible external source(s) from recognized news outlets.
+You MUST evaluate these X-linked sources as your primary evidence:
+- If these credible news articles CONFIRM the claim → mark TRUE
+- Do NOT default to "Unverified" merely because Perplexity's search failed
+- Media reports from reputable outlets ARE sufficient evidence for widely-reported
+  government announcements, public events, and official statements
+- The question is: "Do credible sources confirm this?" — not "Did Perplexity find it?"
+"""
+                else:
+                    perplexity_weight = "LOW (returned irrelevant or no results)"
+                    x_weight = "LOW (no external sources found)"
+
                 # Build structured context section
                 structured_context = f"""
 STRUCTURED CLAIM ANALYSIS:
@@ -196,15 +252,51 @@ STRUCTURED CLAIM ANALYSIS:
 - Context: {context if context else "None provided"}
 """
 
+                # Extract claim metadata for context-aware verdict
+                claim_type = structured_claim.get("claim_type", "other")
+                geographic_scope = structured_claim.get("geographic_scope", "national")
+                location = structured_claim.get("location", "")
+                research_limitations = research_data.get("research_limitations", "")
+
+                # Detect press release characteristics
+                press_release_info = self._detect_press_release_indicators(claim_text)
+                press_release_context = ""
+                if press_release_info["is_likely_press_release"]:
+                    indicators_text = "\n".join([f"  - {ind}" for ind in press_release_info["indicators"]])
+                    press_release_context = f"""
+===============================================================================
+PRESS RELEASE / OFFICIAL ANNOUNCEMENT DETECTION
+===============================================================================
+This claim contains {press_release_info['indicator_count']} indicators of an official government press release:
+{indicators_text}
+
+IMPORTANT CONTEXT FOR VERDICT:
+- Claims with these characteristics are typically copy-pasted from official district
+  administration press releases, government notifications, or collectorate announcements.
+- These are distributed via official WhatsApp groups, notice boards, and local media
+  BEFORE being indexed by search engines.
+- The inability to find this announcement online does NOT mean it is false.
+- For UNVERIFIED verdicts on press releases, your explanation MUST:
+  1. Acknowledge the claim has characteristics of an official government press release
+  2. Note that such announcements are often not immediately indexed online
+  3. Suggest specific verification methods: check the district collectorate's official
+     website/social media, or contact the phone numbers mentioned in the claim
+"""
+
                 verdict_prompt = f"""
-You are a professional fact-checker. Based on the research data below, evaluate the truthfulness of this claim.
+You are a professional fact-checker with expertise across multiple domains. Evaluate the truthfulness of this claim using ALL available evidence: the research data below, X-linked external sources, AND your own verified knowledge.
 
 ORIGINAL INPUT: "{claim_text}"
 
 {structured_context}
 
+CLAIM METADATA:
+- Claim Type: {claim_type.replace('_', ' ').title()}
+- Geographic Scope: {geographic_scope.upper()}
+- Location: {location if location else "Not specified"}
+
 ===============================================================================
-PRIMARY RESEARCH (Perplexity Deep Search) - EVIDENCE WEIGHT: HIGH
+PRIMARY RESEARCH (Perplexity Deep Search) - EVIDENCE WEIGHT: {perplexity_weight}
 ===============================================================================
 RESEARCH SUMMARY:
 {research_summary}
@@ -215,52 +307,132 @@ KEY FINDINGS:
 CREDIBLE SOURCES:
 {sources_text}
 
+RESEARCH LIMITATIONS:
+{research_limitations if research_limitations else "None reported"}
+
 ===============================================================================
-SUPPLEMENTARY CONTEXT (X-Linked External Sources) - EVIDENCE WEIGHT: LOW
+{"X-LINKED EXTERNAL SOURCES" if not x_has_sources or perplexity_has_relevant else "X-LINKED EXTERNAL SOURCES (ELEVATED: Primary research was inconclusive)"} - EVIDENCE WEIGHT: {x_weight}
 ===============================================================================
 {x_context}
+{x_elevation_guidance}
+{press_release_context}
+===============================================================================
+STEP 0: CLAIM CATEGORY CLASSIFICATION (do this FIRST)
+===============================================================================
+Classify this claim into ONE of these categories:
+
+CATEGORY A — SPECIFIC EVENT CLAIM:
+   A recent or specific event, incident, or announcement (protest, accident, arrest,
+   appointment, scheme launch, speech, court ruling, election result, etc.)
+   → These REQUIRE external source evidence (articles, press releases, official records)
+   → Your own knowledge is NOT sufficient — events need source confirmation
+
+CATEGORY B — ESTABLISHED KNOWLEDGE CLAIM:
+   A well-documented, widely-accepted fact about culture, history, geography, economics,
+   science, institutions, or education. Examples:
+   - "Tamil Nadu is known for Bharatanatyam and Carnatic music"
+   - "Tamil Nadu is a leading manufacturing state"
+   - "The Earth revolves around the Sun"
+   - "India's capital is New Delhi"
+   → These can be verified using your own training knowledge from textbooks,
+     encyclopedias, academic sources, and institutional records
+   → These do NOT need recent news articles — they are baseline knowledge
+   → If you are confident this is established knowledge, you may verify it directly
+
+CATEGORY C — MIXED CLAIM:
+   Contains both established facts and specific event details.
+   → Verify each component separately
+
+State which category this claim belongs to before proceeding.
 
 ===============================================================================
-EVIDENCE WEIGHTING RULES:
+STEP 1: EVIDENCE ASSESSMENT
 ===============================================================================
-1. Perplexity Deep Search is your PRIMARY evidence source - give it highest weight
-2. X-linked external sources may REINFORCE or SUPPLEMENT Perplexity findings
-3. IGNORE X analysis completely if it provides no credible external links
-4. NEVER use engagement metrics (likes, retweets, views) as evidence of truth
-5. NEVER treat social media popularity or virality as proof of accuracy
 
-Determine the verdict based on these STRICT criteria:
+FOR CATEGORY A (Specific Events):
+   - Evaluate research findings and X-linked sources for direct evidence
+   - If research returned irrelevant results (gazette docs, homepage listings, unrelated
+     documents), acknowledge this and do NOT treat them as evidence
+   - If X found credible external source links, treat them as valid evidence
+   - Check scope match: local events may not appear in national/international media
 
-✅ TRUE - ONLY use when:
-- Credible sources explicitly CONFIRM the claim with direct evidence
-- Example: Claim "X won election" → Sources report "X won election" = TRUE
+FOR CATEGORY B (Established Knowledge):
+   - You ARE authorized to verify these from your training knowledge
+   - If the claim is factually accurate based on well-documented academic, cultural,
+     historical, scientific, or economic knowledge, mark it TRUE
+   - Cite the TYPE of authoritative sources that document this (e.g., "documented in
+     NCERT textbooks, Encyclopaedia Britannica, academic literature, UNESCO records")
+   - Do NOT mark established facts as "Unverified" simply because a web search
+     didn't return a specific article — that is a search limitation, not factual uncertainty
+   - Only mark established knowledge as FALSE if it is demonstrably wrong
 
-❌ FALSE - ONLY use when:
-- Credible sources explicitly CONTRADICT the claim with direct evidence
-- There must be POSITIVE EVIDENCE that the opposite is true
-- Example: Claim "X won election" → Sources report "Y won election" = FALSE
-- NEVER mark as FALSE just because "no sources found" or "no coverage exists"
+FOR CATEGORY C (Mixed Claims):
+   - Verify each component separately and report accordingly
 
-⚠️ UNVERIFIED - Use for ALL of these situations:
-- No credible sources cover the topic at all
-- Sources discuss related topics but don't confirm or deny the specific claim
-- "No reports found" or "unable to verify" = UNVERIFIED (not FALSE)
-- Local events not covered by major media = UNVERIFIED (not FALSE)
-- Only partial information available = UNVERIFIED
+===============================================================================
+STEP 2: VERDICT DETERMINATION
+===============================================================================
+
+✅ TRUE - Use when:
+- [Category A] Credible external sources explicitly CONFIRM the claim
+- [Category B] The claim is well-established knowledge that you can verify from authoritative sources (textbooks, encyclopedias, academic literature, government records, institutional data)
+- [Category C] All components are verified (some via sources, some via established knowledge)
+
+❌ FALSE - ONLY when:
+- Credible sources or established knowledge explicitly CONTRADICT the claim
+- There must be POSITIVE EVIDENCE that the claim is wrong
+- NEVER mark as FALSE because "no search results found"
+
+⚠️ UNVERIFIED - Use when:
+- [Category A] No relevant sources found for a specific event claim
+- [Category A] Research returned off-topic results and no X sources available
+- [Category B] RARELY — only if the claim is about obscure knowledge you cannot confidently verify
+- Scope mismatch: local event searched only in national/international media
+- Partial information: some parts confirmed, others cannot be verified
+
+===============================================================================
+STEP 3: EXPLANATION RULES
+===============================================================================
+
+FOR TRUE VERDICTS:
+- [Category A] Cite the specific sources that confirm the claim
+- [Category B] State: "This is established [cultural/historical/economic/scientific] knowledge documented in [source types]." Then briefly explain why it's true.
+
+FOR UNVERIFIED VERDICTS (Category A specific events only):
+- State what sources were searched and what was found
+- Recommend specific source types for verification
+- Use: "This claim could not be independently verified through the online sources accessible to this system."
+- NEVER use: "No credible sources were found" or "There is no evidence to support this claim"
+- For local events, note that absence of national media coverage is expected
+
+FOR FALSE VERDICTS:
+- Cite the specific evidence that contradicts the claim
 
 CRITICAL RULES:
-1. "No sources confirm X" does NOT mean X is false - it means UNVERIFIED
-2. "No reports found about X" = UNVERIFIED, never FALSE
-3. To mark FALSE, you MUST have evidence proving the OPPOSITE is true
-4. When in doubt, choose UNVERIFIED over FALSE
+1. NEVER mark well-known cultural, historical, geographic, economic, or scientific facts as "Unverified" just because a web search didn't find articles. That is a SEARCH LIMITATION, not factual uncertainty.
+2. "No search results" for established knowledge = search failure, NOT evidence of falsehood
+3. For specific events: "no sources confirm X" = UNVERIFIED (not FALSE)
+4. When in doubt between TRUE and UNVERIFIED for established knowledge, lean TRUE if you are confident
+5. When in doubt between UNVERIFIED and FALSE for specific events, lean UNVERIFIED
 
 Provide:
-1. STATUS: One of [✅ True, ❌ False, ⚠️ Unverified]
-2. EXPLANATION: A brief (2-3 sentences), factual explanation based on the research
+1. CATEGORY: [A/B/C] with brief justification
+2. STATUS: One of [✅ True, ❌ False, ⚠️ Unverified]
+3. EXPLANATION: A 2-4 sentence explanation following the rules above.
+4. KEY_FINDINGS: 3-5 bullet points summarizing the most important facts discovered during verification (from research data, X sources, AND/OR your own verified knowledge). These should be specific factual statements, not vague summaries.
+5. VERIFIED_SOURCES: List the specific sources that support your verdict. For Category A, cite the news articles or official sources. For Category B, cite authoritative reference types (e.g., "ISRO official mission page", "NCERT textbooks", "WHO guidelines"). Always provide source names — never leave this empty.
 
 Format your response EXACTLY as:
+CATEGORY: [A/B/C] - [brief justification]
 STATUS: [status]
 EXPLANATION: [explanation]
+KEY_FINDINGS:
+- [finding 1]
+- [finding 2]
+- [finding 3]
+VERIFIED_SOURCES:
+- [source 1]
+- [source 2]
 """
 
                 response = chat.send_message(verdict_prompt)
@@ -269,25 +441,51 @@ EXPLANATION: [explanation]
                 # Parse the response
                 status = "⚠️ Unverified"
                 explanation = "Unable to verify this claim based on available information."
+                category = ""
+                gemini_findings = []
+                gemini_sources = []
 
                 lines = result_text.split('\n')
+                current_section = None
                 for i, line in enumerate(lines):
-                    if line.startswith("STATUS:"):
-                        status = line.replace("STATUS:", "").strip()
-                    elif line.startswith("EXPLANATION:"):
-                        # Get explanation (might span multiple lines)
-                        explanation = line.replace("EXPLANATION:", "").strip()
-                        # Check if explanation continues on next lines
-                        for j in range(i + 1, len(lines)):
-                            if not lines[j].startswith("STATUS:") and lines[j].strip():
-                                explanation += " " + lines[j].strip()
-                            else:
-                                break
+                    stripped = line.strip()
+                    if stripped.startswith("CATEGORY:"):
+                        current_section = "category"
+                        category = stripped.replace("CATEGORY:", "").strip()
+                    elif stripped.startswith("STATUS:"):
+                        current_section = "status"
+                        status = stripped.replace("STATUS:", "").strip()
+                    elif stripped.startswith("EXPLANATION:"):
+                        current_section = "explanation"
+                        explanation = stripped.replace("EXPLANATION:", "").strip()
+                    elif stripped.startswith("KEY_FINDINGS:"):
+                        current_section = "findings"
+                    elif stripped.startswith("VERIFIED_SOURCES:"):
+                        current_section = "sources"
+                    elif stripped.startswith("-") or stripped.startswith("•"):
+                        content = stripped.lstrip("-•").strip()
+                        if current_section == "findings" and content:
+                            gemini_findings.append(content)
+                        elif current_section == "sources" and content:
+                            gemini_sources.append(content)
+                    elif current_section == "explanation" and stripped:
+                        # Explanation can span multiple lines
+                        explanation += " " + stripped
+
+                if category:
+                    print(f"[Verdict] Claim category: {category}")
+                    print(f"[Verdict] Gemini findings: {len(gemini_findings)}, Gemini sources: {len(gemini_sources)}")
+
+                # Use Perplexity sources if available, otherwise use Gemini's sources
+                final_sources = sources if sources else gemini_sources
 
                 return {
                     "status": status,
                     "explanation": explanation.strip(),
-                    "sources": sources
+                    "sources": final_sources,
+                    "gemini_findings": gemini_findings,
+                    "gemini_sources": gemini_sources,
+                    "claim_category": category
                 }
 
             except Exception as e:
@@ -321,6 +519,53 @@ EXPLANATION: [explanation]
             "explanation": f"Unable to generate verdict after {max_retries} attempts. Please try again later.",
             "sources": research_data.get("sources", [])
         }
+
+    def _assess_perplexity_relevance(self, research_data: dict) -> bool:
+        """
+        Assess whether Perplexity returned relevant results or irrelevant/empty ones.
+
+        Returns True if Perplexity found specific, relevant evidence.
+        Returns False if results are empty, off-topic, or generic.
+        """
+        summary = research_data.get("summary", "").lower()
+        findings = research_data.get("findings", [])
+        sources = research_data.get("sources", [])
+
+        # No findings and no sources = clearly irrelevant
+        if not findings and not sources:
+            return False
+
+        # Check if summary explicitly says nothing was found
+        no_result_indicators = [
+            "no specific articles",
+            "no specific reports",
+            "no credible sources",
+            "were not found",
+            "could not be found",
+            "no relevant",
+            "no coverage",
+            "no direct evidence",
+            "no reports about",
+            "no articles about",
+            "not found in the sources",
+            "unrelated to",
+            "none contained",
+            "none addressed",
+        ]
+
+        for indicator in no_result_indicators:
+            if indicator in summary:
+                return False
+
+        # If there are findings and sources and summary doesn't say "nothing found", consider relevant
+        if findings and sources:
+            return True
+
+        # If there are findings but no sources, still somewhat relevant
+        if findings:
+            return True
+
+        return False
 
     def _build_x_analysis_context(self, x_analysis_data: dict) -> str:
         """
@@ -362,16 +607,65 @@ EXPLANATION: [explanation]
                 domain = source.get("domain", "unknown")
                 url = source.get("url", "")
                 title = source.get("title", "")
+                description = source.get("description", "")
                 tier = source.get("credibility_tier", "unknown")
 
                 if title:
-                    context_parts.append(f"- [{tier.upper()}] {domain}: {title}")
+                    line = f"- [{tier.upper()}] {domain}: {title}"
+                    if description:
+                        line += f" — {description[:150]}"
+                    context_parts.append(line)
                 else:
                     context_parts.append(f"- [{tier.upper()}] {domain}: {url[:80]}...")
         else:
             context_parts.append("External Sources Found via X: None")
 
         return "\n".join(context_parts)
+
+    def _detect_press_release_indicators(self, claim_text: str) -> dict:
+        """
+        Detect if the claim text has characteristics of an official government press release.
+
+        Press releases typically contain: phone numbers, official designations (IAS/IPS),
+        specific dates with DD.MM.YYYY format, monetary amounts, office addresses,
+        and specific event timings.
+
+        Returns:
+            dict with is_likely_press_release (bool), indicators (list), indicator_count (int)
+        """
+        indicators = []
+
+        # Phone numbers (Indian format: 04365 250126, 9499055737, etc.)
+        if re.search(r'\d{4,5}\s?\d{5,6}', claim_text):
+            indicators.append("official contact phone numbers")
+
+        # Specific time ranges (10.00 மணி, etc.)
+        if re.search(r'\d{1,2}[.:]\d{2}\s*(மணி|am|pm|AM|PM)', claim_text, re.IGNORECASE):
+            indicators.append("specific event timings")
+
+        # Monetary amounts (Tamil ரூ or Rs or ₹)
+        if re.search(r'ரூ[.]?\s*[\d,]+|Rs\.?\s*[\d,]+|₹\s*[\d,]+', claim_text):
+            indicators.append("specific monetary amounts/stipends")
+
+        # Government designations (IAS, IPS, Collector, etc.)
+        if re.search(r'இ\.ஆ\.ப\.|I\.A\.S|IAS|IPS|ஆட்சித்தலைவர்|Collector|Commissioner|District Collector', claim_text, re.IGNORECASE):
+            indicators.append("government official designations (IAS/Collector)")
+
+        # Official address/office references
+        if re.search(r'அலுவலகம்|அலுவலக|வளாகம்|நிலையம்|office|campus', claim_text, re.IGNORECASE):
+            indicators.append("institutional/office addresses")
+
+        # Formatted dates (DD.MM.YYYY)
+        if re.search(r'\d{1,2}\.\d{1,2}\.\d{4}', claim_text):
+            indicators.append("specific formatted dates (DD.MM.YYYY)")
+
+        is_likely = len(indicators) >= 3
+
+        return {
+            "is_likely_press_release": is_likely,
+            "indicators": indicators,
+            "indicator_count": len(indicators)
+        }
 
     def _format_response(self, claim_text: str, verdict: dict, research_data: dict, structured_claim: dict = None, x_analysis_data: dict = None) -> dict:
         """
@@ -387,19 +681,35 @@ EXPLANATION: [explanation]
         Returns:
             dict: Formatted response
         """
+        # Use Perplexity findings/sources when available, fall back to Gemini's
+        perplexity_findings = research_data.get("findings", [])
+        perplexity_sources = research_data.get("sources", [])
+        gemini_findings = verdict.get("gemini_findings", [])
+        gemini_sources = verdict.get("gemini_sources", [])
+
+        # Check if Perplexity actually returned relevant data
+        perplexity_relevant = self._assess_perplexity_relevance(research_data)
+
+        final_findings = perplexity_findings if (perplexity_findings and perplexity_relevant) else gemini_findings
+        final_sources = perplexity_sources if (perplexity_sources and perplexity_relevant) else gemini_sources
+
         response = {
             "claim_text": claim_text,
             "status": verdict.get("status", "⚠️ Unverified"),
             "explanation": verdict.get("explanation", "No explanation available"),
-            "sources": verdict.get("sources", []),
+            "sources": final_sources,
             "research_summary": research_data.get("summary", ""),
-            "findings": research_data.get("findings", [])
+            "findings": final_findings,
+            "research_limitations": research_data.get("research_limitations", "")
         }
 
         # Include structured claim data if available
         if structured_claim:
             response["structured_claim"] = {
                 "claim": structured_claim.get("claim", claim_text),
+                "claim_type": structured_claim.get("claim_type", "other"),
+                "geographic_scope": structured_claim.get("geographic_scope", "national"),
+                "location": structured_claim.get("location", ""),
                 "entities": structured_claim.get("entities", []),
                 "time_period": structured_claim.get("time_period", ""),
                 "context": structured_claim.get("context", "")
