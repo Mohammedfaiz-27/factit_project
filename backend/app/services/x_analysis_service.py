@@ -187,9 +187,14 @@ class XAnalysisService:
             "Content-Type": "application/json"
         }
 
+        # Cap at 15 — we only extract max 8 posts (3 Tamil + 3 National + 2 Common)
+        # Fetching more is wasted API credits. X API v2 minimum is 10.
+        max_results = min(self.search_limit, 15)
+        max_results = max(max_results, 10)  # X API minimum
+
         params = {
             "query": query,
-            "max_results": min(self.search_limit, 100),
+            "max_results": max_results,
             "tweet.fields": "entities,created_at,author_id",
             "expansions": "author_id",
             "user.fields": "name,username,verified,description",
@@ -306,15 +311,15 @@ class XAnalysisService:
 
             categorized[category].append(entry)
 
-        # Take up to 5 from each category
-        tamil = categorized["tamil_news"][:5]
-        national = categorized["national_news"][:5]
-        common = categorized["common_people"][:5]
+        # Take up to 3 from news categories, 2 from common people
+        # (fewer posts = lower Perplexity token cost)
+        tamil = categorized["tamil_news"][:3]
+        national = categorized["national_news"][:3]
+        common = categorized["common_people"][:2]
 
-        # If any category has fewer than 5, fill from others
         result = tamil + national + common
-        if len(result) > 15:
-            result = result[:15]
+        if len(result) > 8:
+            result = result[:8]
 
         print(f"[X Analysis] Posts by category: Tamil news={len(tamil)}, National news={len(national)}, Common people={len(common)}")
 

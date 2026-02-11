@@ -127,11 +127,13 @@ class ProfessionalFactCheckService:
             }
 
         # Step 3b: Extract X posts as evidence for Perplexity
-        x_evidence = x_analysis_data.get("posts_content", [])
+        # Only feed news channel posts (priority 1-2) to save Perplexity tokens
+        all_posts = x_analysis_data.get("posts_content", [])
+        x_evidence = [p for p in all_posts if p.get("priority", 3) <= 2]
         if x_evidence:
-            print(f"[RESEARCH] Step 3b: Feeding {len(x_evidence)} X posts as evidence into Perplexity...")
+            print(f"[RESEARCH] Step 3b: Feeding {len(x_evidence)} news channel posts as evidence into Perplexity (skipped {len(all_posts) - len(x_evidence)} common posts)")
         else:
-            print(f"[RESEARCH] Step 3b: No X posts to feed — running Perplexity without X evidence")
+            print(f"[RESEARCH] Step 3b: No news channel posts to feed — running Perplexity without X evidence")
 
         # Step 3c: Run Perplexity WITH X evidence
         print(f"[RESEARCH] Step 3b: Perplexity Deep Search — starting...")

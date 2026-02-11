@@ -316,21 +316,21 @@ DOMAIN-SPECIFIC SOURCE HIERARCHY (search in this priority order):
         if tamil_posts:
             lines.append("[TAMIL NEWS CHANNELS]")
             for p in tamil_posts:
-                text = p.get("text", "").replace("\n", " ")[:200]
+                text = p.get("text", "").replace("\n", " ")[:140]
                 lines.append(f"- @{p.get('author_handle', '?')} ({p.get('date', '?')}): \"{text}\"")
             lines.append("")
 
         if national_posts:
             lines.append("[NATIONAL NEWS CHANNELS]")
             for p in national_posts:
-                text = p.get("text", "").replace("\n", " ")[:200]
+                text = p.get("text", "").replace("\n", " ")[:140]
                 lines.append(f"- @{p.get('author_handle', '?')} ({p.get('date', '?')}): \"{text}\"")
             lines.append("")
 
         if common_posts:
             lines.append("[PUBLIC POSTS]")
             for p in common_posts:
-                text = p.get("text", "").replace("\n", " ")[:200]
+                text = p.get("text", "").replace("\n", " ")[:140]
                 lines.append(f"- @{p.get('author_handle', '?')} ({p.get('date', '?')}): \"{text}\"")
             lines.append("")
 
