@@ -17,13 +17,14 @@ class PerplexityService:
         self.base_url = "https://api.perplexity.ai/chat/completions"
         self.model = "sonar-pro"  # Perplexity's online research model
 
-    def deep_research(self, search_query: str, structured_claim: dict) -> dict:
+    def deep_research(self, search_query: str, structured_claim: dict, x_evidence: list = None) -> dict:
         """
         Perform deep research using Perplexity AI.
 
         Args:
             search_query (str): Optimized search query
             structured_claim (dict): Structured claim data
+            x_evidence (list): Optional list of X posts to use as research leads
 
         Returns:
             dict: Research results with findings and sources
@@ -95,6 +96,8 @@ Additional Details:
 Search Query: {search_query}
 
 {"IMPORTANT: This claim is originally in a regional language. Search for this claim using BOTH the English translation AND the original regional language text. Regional newspapers and news websites publish in the regional language, so searching only in English will miss most relevant coverage. Try searching key names and terms in the original language on regional news websites." if is_regional_language else ""}
+
+{self._format_x_evidence(x_evidence) if x_evidence else ""}
 
 Provide:
 1. A summary of what was ACTUALLY FOUND (not what sources exist in general)
@@ -290,6 +293,52 @@ DOMAIN-SPECIFIC SOURCE HIERARCHY (search in this priority order):
 {scope_note}"""
 
         return guidance
+
+    def _format_x_evidence(self, x_evidence: list) -> str:
+        """
+        Format X posts as an evidence section for the research prompt.
+
+        Posts are grouped by author category (Tamil news, National news, Public).
+        """
+        if not x_evidence:
+            return ""
+
+        tamil_posts = [p for p in x_evidence if p.get("author_category") == "tamil_news"]
+        national_posts = [p for p in x_evidence if p.get("author_category") == "national_news"]
+        common_posts = [p for p in x_evidence if p.get("author_category") == "common_people"]
+
+        lines = [
+            "===============================================================================",
+            "X (SOCIAL MEDIA) EVIDENCE — Posts found discussing this claim:",
+            "===============================================================================",
+        ]
+
+        if tamil_posts:
+            lines.append("[TAMIL NEWS CHANNELS]")
+            for p in tamil_posts:
+                text = p.get("text", "").replace("\n", " ")[:200]
+                lines.append(f"- @{p.get('author_handle', '?')} ({p.get('date', '?')}): \"{text}\"")
+            lines.append("")
+
+        if national_posts:
+            lines.append("[NATIONAL NEWS CHANNELS]")
+            for p in national_posts:
+                text = p.get("text", "").replace("\n", " ")[:200]
+                lines.append(f"- @{p.get('author_handle', '?')} ({p.get('date', '?')}): \"{text}\"")
+            lines.append("")
+
+        if common_posts:
+            lines.append("[PUBLIC POSTS]")
+            for p in common_posts:
+                text = p.get("text", "").replace("\n", " ")[:200]
+                lines.append(f"- @{p.get('author_handle', '?')} ({p.get('date', '?')}): \"{text}\"")
+            lines.append("")
+
+        lines.append("Use these X posts as LEADS for your research. Verify the claims made in these posts")
+        lines.append("using credible sources. Posts from news channels are more reliable than common users.")
+        lines.append("If news channel posts report specific facts, try to find the original articles or sources.")
+
+        return "\n".join(lines)
 
     def _parse_research_response(self, research_text: str) -> dict:
         """

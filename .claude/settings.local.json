@@ -35,7 +35,8 @@
       "Bash(where.exe:*)",
       "Bash(cmd.exe /c:*)",
       "Bash(\"/c/Users/Asus/AppData/Local/Programs/Python/Python313/python.exe\" -m uvicorn main:app --port 8000)",
-      "Bash(powershell.exe -Command \"Get-Content -Path \\(Get-ChildItem -Path ''C:\\\\Users\\\\Asus\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\F--newsit-fact-checker-project\\\\tasks\\\\'' -Filter ''*.output'' | Sort-Object LastWriteTime -Descending | Select-Object -First 1\\).FullName -Tail 80\")"
+      "Bash(powershell.exe -Command \"Get-Content -Path \\(Get-ChildItem -Path ''C:\\\\Users\\\\Asus\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\F--newsit-fact-checker-project\\\\tasks\\\\'' -Filter ''*.output'' | Sort-Object LastWriteTime -Descending | Select-Object -First 1\\).FullName -Tail 80\")",
+      "mcp__ide__getDiagnostics"
     ],
     "deny": [],
     "ask": []

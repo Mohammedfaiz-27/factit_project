@@ -1,15 +1,15 @@
 """
 X (Twitter) Analysis Service
 
-Analyzes X/Twitter for external source links related to a claim.
-This service is used to surface additional context from social media discussions,
-specifically focusing on extracting external links to credible sources.
+Analyzes X/Twitter for posts related to a claim, extracting post text, dates,
+and author information to feed as evidence into Perplexity research.
 
-CRITICAL RULES:
-- X is NEVER a source of truth
-- Only extracts external links (news articles, government portals, official sources)
-- Ignores engagement metrics (likes, retweets, replies)
-- Returns structured data for Gemini to evaluate as supplementary context
+Authors are classified by priority:
+1. Tamil news channels (highest priority)
+2. National news channels
+3. Common people (lowest priority)
+
+External links are still extracted for backward compatibility.
 """
 
 from app.core.config import X_BEARER_TOKEN, X_ANALYSIS_ENABLED, X_SEARCH_LIMIT
@@ -21,11 +21,10 @@ from typing import List, Dict, Optional
 
 class XAnalysisService:
     """
-    Analyzes X (Twitter) for external source links related to a claim.
+    Analyzes X (Twitter) for posts discussing a claim.
 
-    This service searches X for posts discussing a claim and extracts
-    external links that may provide additional verification sources.
-    X itself is never treated as a source of truth.
+    Extracts post text, dates, and classifies authors by priority tier.
+    Results are fed into Perplexity as research evidence.
     """
 
     def __init__(self):
@@ -34,35 +33,46 @@ class XAnalysisService:
         self.search_limit = X_SEARCH_LIMIT
         self.base_url = "https://api.twitter.com/2"
 
+        # Tamil news X handles (priority 1)
+        self.tamil_news_handles = {
+            "dinamaborig", "dailythanthi", "news7tamil", "pttvonlinenews",
+            "thanthitv", "sunnewstamil", "polimernews", "kaborimedia",
+            "aborathamil", "dinamani", "maalaimalar", "vikaborig",
+            "paboriyathalaim", "daborext", "news18tamilnadu", "newsaboramil",
+            "jaboramilnadu", "caborewstamil", "newsjtamil", "aborpnews",
+            "hinduaboramil", "onaboriatamil",
+        }
+
+        # National news X handles (priority 2)
+        self.national_news_handles = {
+            "ndtv", "the_hindu", "indiatoday", "timesofindia",
+            "htaborig", "indianexpress", "pti_news", "ani",
+            "news18india", "republic", "ababorews", "zeenews",
+            "theprint", "scroll_in", "thequint", "livemint",
+            "baborandardbiz", "deccanherald", "neaborianexp",
+            "oneindia", "firstpost", "outlookindia", "theweek",
+            "ndtvindia", "aaborak", "baborbc_india",
+        }
+
         # Credibility tiers for linked domains
         self.primary_sources = {
-            # International news agencies
             "reuters.com", "apnews.com", "afp.com",
-            # Major broadcasters
             "bbc.com", "bbc.co.uk", "npr.org", "pbs.org",
-            # Government and official sources
             "gov", "gov.uk", "gov.in", "europa.eu", "un.org", "who.int",
-            # Academic and research
             "edu", "ac.uk", "nature.com", "sciencedirect.com", "pubmed.ncbi.nlm.nih.gov",
         }
 
         self.secondary_sources = {
-            # Major newspapers
             "nytimes.com", "washingtonpost.com", "theguardian.com", "wsj.com",
             "economist.com", "ft.com", "thehindu.com", "indianexpress.com",
             "timesofindia.indiatimes.com", "hindustantimes.com",
-            # News networks
             "cnn.com", "nbcnews.com", "abcnews.go.com", "cbsnews.com",
             "ndtv.com", "indiatoday.in",
-            # Wire services
             "pti.in", "ani.in",
-            # Fact-checkers
             "snopes.com", "factcheck.org", "politifact.com", "altnews.in",
-            # Regional Indian news — Tamil Nadu
             "dinamalar.com", "dailythanthi.com", "dinamani.com", "maalaimalar.com",
             "vikatan.com", "news7tamil.live", "puthiyathalaimurai.com",
             "polimernews.com", "dtnext.in",
-            # Regional Indian news — other states & national
             "news18.com", "aajtak.in", "dainikbhaskar.com",
             "eenadu.net", "mathrubhumi.com", "manoramaonline.com",
             "deccanherald.com", "deccanchronicle.com",
@@ -76,14 +86,9 @@ class XAnalysisService:
 
     def analyze_claim(self, structured_claim: dict, search_query: str) -> dict:
         """
-        Analyze X for posts discussing the claim that contain external links.
+        Analyze X for posts discussing the claim.
 
-        Args:
-            structured_claim (dict): Structured claim data with entities, time_period, etc.
-            search_query (str): Optimized search query from claim structuring
-
-        Returns:
-            dict: Analysis results with external sources and discussion summary
+        Returns post text, dates, author classifications, and external links.
         """
         if not self.enabled:
             return self._disabled_response()
@@ -92,27 +97,29 @@ class XAnalysisService:
             return self._fallback_analysis(structured_claim, search_query)
 
         try:
-            # Build search query optimized for X
             x_query = self._build_x_search_query(structured_claim, search_query)
 
-            # Search X for recent posts with links
-            posts = self._search_posts_with_links(x_query)
+            posts, users_map = self._search_posts(x_query)
 
             if not posts:
                 return self._no_results_response(x_query)
 
-            # Extract and categorize external URLs
+            # Extract post content with author classification
+            posts_content = self._extract_posts_content(posts, users_map)
+
+            # Extract and categorize external URLs (backward compat)
             external_sources = self._extract_external_sources(posts)
 
             # Generate neutral discussion summary
-            discussion_summary = self._summarize_discussion(posts, structured_claim)
+            discussion_summary = self._summarize_discussion(posts, posts_content, structured_claim)
 
             # Generate analysis note
-            analysis_note = self._generate_analysis_note(external_sources)
+            analysis_note = self._generate_analysis_note(external_sources, posts_content)
 
             return {
                 "has_relevant_posts": True,
                 "posts_analyzed": len(posts),
+                "posts_content": posts_content,
                 "external_sources": external_sources,
                 "discussion_summary": discussion_summary,
                 "analysis_note": analysis_note,
@@ -132,70 +139,48 @@ class XAnalysisService:
     def _build_x_search_query(self, structured_claim: dict, search_query: str) -> str:
         """
         Build an optimized search query for X API.
-        Uses top 2 entities for focus and does NOT restrict language,
-        since local Indian events are often discussed in regional languages.
-
-        Args:
-            structured_claim (dict): Structured claim data
-            search_query (str): Base search query
-
-        Returns:
-            str: Optimized X search query
+        No language restriction; no has:links filter (we want ALL posts).
         """
-        # Extract key entities for focused search
         entities = structured_claim.get("entities", [])
         claim = structured_claim.get("claim", search_query)
         original_input = structured_claim.get("original_input", "")
         geographic_scope = structured_claim.get("geographic_scope", "national")
 
-        # Build query components
         query_parts = []
 
-        # Add main entities (limit to top 2 for broader matching)
         if entities:
             entity_query = " ".join(entities[:2])
             query_parts.append(entity_query)
         else:
-            # Use first 4 significant words from claim
             words = [w for w in claim.split() if len(w) > 3][:4]
             query_parts.append(" ".join(words))
 
-        # Combine and add filter for posts with links
         base_query = " ".join(query_parts)
 
         # For local/district claims with regional language input,
-        # extract key regional language terms for better X matching
+        # use regional language terms (people tweet in their language)
         if geographic_scope in ("local", "district") and original_input:
             is_regional = any(ord(c) > 127 for c in original_input.replace(' ', ''))
             if is_regional:
-                # Extract first few significant words from original language input
                 original_words = [w for w in original_input.split() if len(w) > 2][:3]
                 if original_words:
                     regional_terms = " ".join(original_words)
-                    # Use regional terms as primary query (people tweet in their language)
                     base_query = regional_terms
 
-        # X API search operators:
-        # - has:links filters for posts with URLs
-        # - -is:retweet excludes retweets
-        # - Do NOT add lang:en — local events are discussed in regional languages
-        x_query = f"{base_query} has:links -is:retweet"
+        # No has:links — we want ALL posts about the claim, not just ones with links
+        x_query = f"{base_query} -is:retweet"
 
-        # Limit query length for API
         if len(x_query) > 500:
             x_query = x_query[:500]
 
         return x_query
 
-    def _search_posts_with_links(self, query: str) -> List[dict]:
+    def _search_posts(self, query: str) -> tuple:
         """
-        Search X API for posts matching the query that contain links.
-
-        Args:
-            query (str): Search query
+        Search X API for posts matching the query with author expansion.
 
         Returns:
-            List[dict]: List of post data
+            tuple: (list of tweets, dict mapping author_id -> user object)
         """
         headers = {
             "Authorization": f"Bearer {self.bearer_token}",
@@ -204,10 +189,10 @@ class XAnalysisService:
 
         params = {
             "query": query,
-            "max_results": min(self.search_limit, 100),  # X API max is 100
-            "tweet.fields": "entities,created_at,public_metrics,author_id",
+            "max_results": min(self.search_limit, 100),
+            "tweet.fields": "entities,created_at,author_id",
             "expansions": "author_id",
-            "user.fields": "verified,verified_type"
+            "user.fields": "name,username,verified,description",
         }
 
         print(f"[X Analysis] Searching for: {query[:80]}...")
@@ -224,28 +209,119 @@ class XAnalysisService:
         if response.status_code == 200:
             data = response.json()
             tweets = data.get("data", [])
-            print(f"[X Analysis] Found {len(tweets)} posts with links")
-            return tweets
+
+            # Build user lookup map from includes
+            users_map = {}
+            includes = data.get("includes", {})
+            for user in includes.get("users", []):
+                users_map[user["id"]] = user
+
+            print(f"[X Analysis] Found {len(tweets)} posts, {len(users_map)} unique authors")
+            return tweets, users_map
         elif response.status_code == 401:
             print("[X Analysis] Authentication failed - check bearer token")
-            return []
+            return [], {}
         elif response.status_code == 429:
             print("[X Analysis] Rate limited")
-            return []
+            return [], {}
         else:
             print(f"[X Analysis] API error: {response.status_code}")
-            return []
+            return [], {}
 
-    def _extract_external_sources(self, posts: List[dict]) -> List[dict]:
+    def _classify_author(self, username: str, description: str = "", verified: bool = False) -> tuple:
         """
-        Extract and categorize external URLs from posts.
-
-        Args:
-            posts (List[dict]): List of post data
+        Classify an author into a priority tier.
 
         Returns:
-            List[dict]: List of external source data
+            tuple: (category_name, priority_number)
+                   priority 1 = Tamil news (highest)
+                   priority 2 = National news
+                   priority 3 = Common people (lowest)
         """
+        handle_lower = username.lower() if username else ""
+
+        # Check Tamil news handles
+        if handle_lower in self.tamil_news_handles:
+            return "tamil_news", 1
+
+        # Check national news handles
+        if handle_lower in self.national_news_handles:
+            return "national_news", 2
+
+        # Secondary signal: check description for news keywords
+        if description:
+            desc_lower = description.lower()
+            news_keywords = [
+                "news", "media", "channel", "reporter", "journalist",
+                "newspaper", "editor", "correspondent", "செய்தி",
+                "நிருபர்", "ஊடகம்",
+            ]
+            if any(kw in desc_lower for kw in news_keywords):
+                # Check for Tamil-specific indicators
+                tamil_indicators = [
+                    "tamil", "tamilnadu", "tamil nadu", "chennai",
+                    "தமிழ்", "தமிழ்நாடு",
+                ]
+                if any(ind in desc_lower for ind in tamil_indicators):
+                    return "tamil_news", 1
+                return "national_news", 2
+
+        # Verified accounts with no news keywords are still common people
+        return "common_people", 3
+
+    def _extract_posts_content(self, posts: List[dict], users_map: dict) -> List[dict]:
+        """
+        Extract post text, date, and author info with priority classification.
+
+        Limits to top 15 posts: up to 5 Tamil news + 5 National news + 5 Common people
+        (fills from available if a category has fewer).
+        """
+        categorized = {"tamil_news": [], "national_news": [], "common_people": []}
+
+        for post in posts:
+            text = post.get("text", "")
+            created_at = post.get("created_at", "")
+            author_id = post.get("author_id", "")
+
+            # Look up author info
+            user = users_map.get(author_id, {})
+            author_name = user.get("name", "Unknown")
+            author_handle = user.get("username", "unknown")
+            description = user.get("description", "")
+            verified = user.get("verified", False)
+
+            category, priority = self._classify_author(author_handle, description, verified)
+
+            # Parse date to just YYYY-MM-DD if full ISO timestamp
+            date_short = created_at[:10] if created_at else ""
+
+            entry = {
+                "text": text,
+                "date": date_short,
+                "author_name": author_name,
+                "author_handle": author_handle,
+                "author_category": category,
+                "priority": priority,
+            }
+
+            categorized[category].append(entry)
+
+        # Take up to 5 from each category
+        tamil = categorized["tamil_news"][:5]
+        national = categorized["national_news"][:5]
+        common = categorized["common_people"][:5]
+
+        # If any category has fewer than 5, fill from others
+        result = tamil + national + common
+        if len(result) > 15:
+            result = result[:15]
+
+        print(f"[X Analysis] Posts by category: Tamil news={len(tamil)}, National news={len(national)}, Common people={len(common)}")
+
+        return result
+
+    def _extract_external_sources(self, posts: List[dict]) -> List[dict]:
+        """Extract and categorize external URLs from posts."""
         external_sources = []
         seen_domains = set()
 
@@ -256,31 +332,24 @@ class XAnalysisService:
             for url_entity in urls:
                 expanded_url = url_entity.get("expanded_url", "")
 
-                # Skip X/Twitter internal links
                 if not expanded_url or "twitter.com" in expanded_url or "x.com" in expanded_url:
                     continue
 
-                # Skip URL shorteners without resolution
                 if any(shortener in expanded_url for shortener in ["bit.ly", "t.co", "tinyurl"]):
-                    # Use unwound_url if available
                     expanded_url = url_entity.get("unwound_url", expanded_url)
 
-                # Parse domain
                 try:
                     parsed = urlparse(expanded_url)
                     domain = parsed.netloc.lower().replace("www.", "")
                 except:
                     continue
 
-                # Skip duplicates from same domain
                 if domain in seen_domains:
                     continue
                 seen_domains.add(domain)
 
-                # Determine credibility tier
                 credibility_tier = self._get_credibility_tier(domain)
 
-                # Extract title/context if available
                 title = url_entity.get("title", "")
                 description = url_entity.get("description", "")
 
@@ -292,115 +361,82 @@ class XAnalysisService:
                     "credibility_tier": credibility_tier
                 })
 
-        # Sort by credibility tier (primary first)
         tier_order = {"primary": 0, "secondary": 1, "unknown": 2}
         external_sources.sort(key=lambda x: tier_order.get(x["credibility_tier"], 2))
 
-        # Limit to top sources
-        return external_sources[:10]
+        return external_sources[:5]
 
     def _get_credibility_tier(self, domain: str) -> str:
-        """
-        Determine the credibility tier of a domain.
-
-        Args:
-            domain (str): Domain name
-
-        Returns:
-            str: Credibility tier (primary, secondary, unknown)
-        """
-        # Check for exact match in primary sources
+        """Determine the credibility tier of a domain."""
         if domain in self.primary_sources:
             return "primary"
 
-        # Check for TLD-based primary sources (gov, edu)
         for suffix in [".gov", ".edu", ".ac.uk", ".gov.uk", ".gov.in"]:
             if domain.endswith(suffix):
                 return "primary"
 
-        # Check for exact match in secondary sources
         if domain in self.secondary_sources:
             return "secondary"
 
-        # Check if domain contains any secondary source
         for source in self.secondary_sources:
             if source in domain:
                 return "secondary"
 
         return "unknown"
 
-    def _summarize_discussion(self, posts: List[dict], structured_claim: dict) -> str:
-        """
-        Generate a neutral summary of the X discussion.
-        Does NOT include opinions or sentiment - only factual observation.
-
-        Args:
-            posts (List[dict]): List of posts
-            structured_claim (dict): Structured claim data
-
-        Returns:
-            str: Neutral discussion summary
-        """
+    def _summarize_discussion(self, posts: List[dict], posts_content: List[dict], structured_claim: dict) -> str:
+        """Generate a neutral summary of the X discussion."""
         if not posts:
             return "No relevant discussion found on X."
 
-        claim = structured_claim.get("claim", "this topic")
         num_posts = len(posts)
+        tamil_count = sum(1 for p in posts_content if p["author_category"] == "tamil_news")
+        national_count = sum(1 for p in posts_content if p["author_category"] == "national_news")
+        common_count = sum(1 for p in posts_content if p["author_category"] == "common_people")
 
-        # Count posts with credible external links
-        credible_link_count = 0
-        for post in posts:
-            entities = post.get("entities", {})
-            urls = entities.get("urls", [])
-            for url_entity in urls:
-                expanded_url = url_entity.get("expanded_url", "")
-                if expanded_url:
-                    try:
-                        parsed = urlparse(expanded_url)
-                        domain = parsed.netloc.lower().replace("www.", "")
-                        if self._get_credibility_tier(domain) in ["primary", "secondary"]:
-                            credible_link_count += 1
-                            break
-                    except:
-                        pass
+        summary = f"Found {num_posts} posts on X discussing this topic"
+        parts = []
+        if tamil_count > 0:
+            parts.append(f"{tamil_count} from Tamil news channels")
+        if national_count > 0:
+            parts.append(f"{national_count} from national news channels")
+        if common_count > 0:
+            parts.append(f"{common_count} from public accounts")
 
-        summary = f"Found {num_posts} posts on X discussing this topic. "
-
-        if credible_link_count > 0:
-            summary += f"{credible_link_count} posts included links to credible news sources or official websites."
+        if parts:
+            summary += f" ({', '.join(parts)})."
         else:
-            summary += "No posts contained links to credible news sources."
+            summary += "."
 
         return summary
 
-    def _generate_analysis_note(self, external_sources: List[dict]) -> str:
-        """
-        Generate an analysis note based on the external sources found.
+    def _generate_analysis_note(self, external_sources: List[dict], posts_content: List[dict] = None) -> str:
+        """Generate an analysis note based on findings."""
+        parts = []
 
-        Args:
-            external_sources (List[dict]): List of external sources
+        if posts_content:
+            news_count = sum(1 for p in posts_content if p["priority"] <= 2)
+            if news_count > 0:
+                parts.append(f"{news_count} news channel post(s) extracted as research leads")
 
-        Returns:
-            str: Analysis note
-        """
-        if not external_sources:
+        if external_sources:
+            primary_count = sum(1 for s in external_sources if s["credibility_tier"] == "primary")
+            secondary_count = sum(1 for s in external_sources if s["credibility_tier"] == "secondary")
+            if primary_count > 0:
+                parts.append(f"{primary_count} primary source link(s)")
+            if secondary_count > 0:
+                parts.append(f"{secondary_count} secondary source link(s)")
+
+        if parts:
+            return "X analysis found: " + ", ".join(parts) + ". This evidence was provided to Perplexity for research."
+        else:
             return "No verifiable external sources found via X."
 
-        primary_count = sum(1 for s in external_sources if s["credibility_tier"] == "primary")
-        secondary_count = sum(1 for s in external_sources if s["credibility_tier"] == "secondary")
-
-        if primary_count > 0:
-            return f"X posts linked to {primary_count} primary source(s) and {secondary_count} secondary source(s) that may corroborate research findings."
-        elif secondary_count > 0:
-            return f"X posts linked to {secondary_count} secondary news source(s) that may provide additional context."
-        else:
-            return "X posts contained links to sources of unknown credibility. Exercise caution."
-
     def _disabled_response(self) -> dict:
-        """Return response when X analysis is disabled."""
         return {
             "has_relevant_posts": False,
             "posts_analyzed": 0,
+            "posts_content": [],
             "external_sources": [],
             "discussion_summary": "",
             "analysis_note": "X analysis is disabled.",
@@ -408,10 +444,10 @@ class XAnalysisService:
         }
 
     def _no_results_response(self, query: str) -> dict:
-        """Return response when no posts are found."""
         return {
             "has_relevant_posts": False,
             "posts_analyzed": 0,
+            "posts_content": [],
             "external_sources": [],
             "discussion_summary": "No relevant posts found on X for this claim.",
             "analysis_note": "No verifiable external sources found via X.",
@@ -419,10 +455,10 @@ class XAnalysisService:
         }
 
     def _error_response(self, error_message: str) -> dict:
-        """Return response when an error occurs."""
         return {
             "has_relevant_posts": False,
             "posts_analyzed": 0,
+            "posts_content": [],
             "external_sources": [],
             "discussion_summary": "",
             "analysis_note": f"X analysis unavailable: {error_message}",
@@ -431,20 +467,10 @@ class XAnalysisService:
         }
 
     def _fallback_analysis(self, structured_claim: dict, search_query: str) -> dict:
-        """
-        Fallback analysis when X API is not configured.
-        Returns a structured response indicating the limitation.
-
-        Args:
-            structured_claim (dict): Structured claim data
-            search_query (str): Search query
-
-        Returns:
-            dict: Fallback response
-        """
         return {
             "has_relevant_posts": False,
             "posts_analyzed": 0,
+            "posts_content": [],
             "external_sources": [],
             "discussion_summary": "",
             "analysis_note": "X analysis requires API configuration. Proceeding with Perplexity research only.",

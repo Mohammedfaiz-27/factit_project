@@ -7,7 +7,6 @@ from google import genai
 from datetime import datetime
 import time
 import re
-import concurrent.futures
 
 
 class ProfessionalFactCheckService:
@@ -15,13 +14,12 @@ class ProfessionalFactCheckService:
     Professional fact-checking service following the 6-step pipeline:
     1. Check Database Cache
     2. LLM Structuring
-    3. Perplexity Deep Research + X Analysis (parallel)
+    3. Research Phase:
+       a) X Analysis FIRST — extracts posts with text, date, author priority
+       b) Perplexity Deep Research — receives X evidence as input leads
     4. Generate Final Result
     5. Database Storage
     6. Return Response
-
-    X Analysis runs in parallel with Perplexity and provides supplementary
-    context from external links found in X posts. X is never a source of truth.
     """
 
     def __init__(self):
@@ -54,8 +52,8 @@ class ProfessionalFactCheckService:
         structured_claim = self.structuring.structure_claim(claim_text)
         search_query = self.structuring.create_search_query(structured_claim)
 
-        # Step 3: Perplexity Deep Research + X Analysis (parallel execution)
-        research_data, x_analysis_data = self._run_parallel_research(
+        # Step 3: X Analysis → Perplexity Deep Research (sequential — X feeds into Perplexity)
+        research_data, x_analysis_data = self._run_research(
             search_query, structured_claim
         )
 
@@ -89,9 +87,13 @@ class ProfessionalFactCheckService:
         formatted_response["cached"] = False
         return formatted_response
 
-    def _run_parallel_research(self, search_query: str, structured_claim: dict) -> tuple:
+    def _run_research(self, search_query: str, structured_claim: dict) -> tuple:
         """
-        Run Perplexity Deep Research and X Analysis in parallel.
+        Run X Analysis first, then feed X evidence into Perplexity Deep Research.
+
+        Flow:
+          Step 3a: X Analysis → extracts posts with text, date, author priority
+          Step 3b: Perplexity receives X posts as research leads
 
         Args:
             search_query (str): Optimized search query
@@ -100,53 +102,50 @@ class ProfessionalFactCheckService:
         Returns:
             tuple: (research_data, x_analysis_data)
         """
-        research_data = None
+        print(f"\n[RESEARCH] Starting sequential research phase...")
+
+        # Step 3a: Run X Analysis FIRST
+        print(f"[RESEARCH] Step 3a: X Analysis — searching for posts...")
         x_analysis_data = None
+        try:
+            x_analysis_data = self.x_analysis.analyze_claim(structured_claim, search_query)
+            posts_analyzed = x_analysis_data.get("posts_analyzed", 0)
+            posts_content = x_analysis_data.get("posts_content", [])
+            sources_found = len(x_analysis_data.get("external_sources", []))
+            news_posts = sum(1 for p in posts_content if p.get("priority", 3) <= 2)
+            print(f"[RESEARCH] Step 3a: X Analysis complete ({posts_analyzed} posts, {news_posts} from news channels, {sources_found} external links)")
+        except Exception as e:
+            print(f"[RESEARCH] Step 3a: X Analysis failed ({str(e)})")
+            x_analysis_data = {
+                "has_relevant_posts": False,
+                "posts_analyzed": 0,
+                "posts_content": [],
+                "external_sources": [],
+                "discussion_summary": "",
+                "analysis_note": f"X analysis unavailable: {str(e)}",
+                "error": str(e)
+            }
 
-        print(f"\n[RESEARCH] Starting parallel research phase...")
-        print(f"[RESEARCH] - Perplexity Deep Search: Starting")
-        print(f"[RESEARCH] - X Analysis: Starting")
+        # Step 3b: Extract X posts as evidence for Perplexity
+        x_evidence = x_analysis_data.get("posts_content", [])
+        if x_evidence:
+            print(f"[RESEARCH] Step 3b: Feeding {len(x_evidence)} X posts as evidence into Perplexity...")
+        else:
+            print(f"[RESEARCH] Step 3b: No X posts to feed — running Perplexity without X evidence")
 
-        # Use ThreadPoolExecutor for parallel execution
-        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
-            # Submit both tasks
-            perplexity_future = executor.submit(
-                self.perplexity.deep_research, search_query, structured_claim
-            )
-            x_analysis_future = executor.submit(
-                self.x_analysis.analyze_claim, structured_claim, search_query
-            )
-
-            # Wait for Perplexity (primary - required)
-            try:
-                research_data = perplexity_future.result(timeout=60)
-                print(f"[RESEARCH] - Perplexity Deep Search: Complete")
-            except Exception as e:
-                print(f"[RESEARCH] - Perplexity Deep Search: Failed ({str(e)})")
-                research_data = {
-                    "summary": f"Research failed: {str(e)}",
-                    "findings": [],
-                    "sources": []
-                }
-
-            # Wait for X Analysis (supplementary - optional)
-            try:
-                x_analysis_data = x_analysis_future.result(timeout=30)
-                posts_analyzed = x_analysis_data.get("posts_analyzed", 0)
-                sources_found = len(x_analysis_data.get("external_sources", []))
-                print(f"[RESEARCH] - X Analysis: Complete ({posts_analyzed} posts, {sources_found} external sources)")
-            except Exception as e:
-                print(f"[RESEARCH] - X Analysis: Failed ({str(e)})")
-                x_analysis_data = {
-                    "has_relevant_posts": False,
-                    "posts_analyzed": 0,
-                    "external_sources": [],
-                    "discussion_summary": "",
-                    "analysis_note": f"X analysis unavailable: {str(e)}",
-                    "error": str(e)
-                }
-
-        print(f"[RESEARCH] Parallel research phase complete")
+        # Step 3c: Run Perplexity WITH X evidence
+        print(f"[RESEARCH] Step 3b: Perplexity Deep Search — starting...")
+        research_data = None
+        try:
+            research_data = self.perplexity.deep_research(search_query, structured_claim, x_evidence)
+            print(f"[RESEARCH] Step 3b: Perplexity Deep Search complete")
+        except Exception as e:
+            print(f"[RESEARCH] Step 3b: Perplexity Deep Search failed ({str(e)})")
+            research_data = {
+                "summary": f"Research failed: {str(e)}",
+                "findings": [],
+                "sources": []
+            }
 
         # Retry with alternative query if Perplexity returned nothing useful
         if not self._assess_perplexity_relevance(research_data):
@@ -154,7 +153,7 @@ class ProfessionalFactCheckService:
             if alt_query and alt_query != search_query:
                 print(f"[RESEARCH] Perplexity returned no findings. Retrying with alternative query...")
                 try:
-                    retry_data = self.perplexity.deep_research(alt_query, structured_claim)
+                    retry_data = self.perplexity.deep_research(alt_query, structured_claim, x_evidence)
                     if self._assess_perplexity_relevance(retry_data):
                         research_data = retry_data
                         print(f"[RESEARCH] Retry successful — found relevant results")
@@ -202,46 +201,8 @@ class ProfessionalFactCheckService:
                 sources_text = "\n".join([f"- {s}" for s in sources]) if sources else "No sources available"
                 entities_text = ", ".join(entities) if entities else "N/A"
 
-                # Build X analysis context (SUPPLEMENTARY)
-                x_context = self._build_x_analysis_context(x_analysis_data)
-
-                # Determine if Perplexity returned relevant results
-                perplexity_has_relevant = self._assess_perplexity_relevance(research_data)
-                x_has_sources = (
-                    x_analysis_data and
-                    x_analysis_data.get("has_relevant_posts", False) and
-                    len(x_analysis_data.get("external_sources", [])) > 0
-                )
-
-                # Dynamic evidence weighting
-                x_elevation_guidance = ""
-                if perplexity_has_relevant:
-                    perplexity_weight = "HIGH"
-                    x_weight = "LOW (supplementary)"
-                elif x_has_sources:
-                    # Perplexity failed but X found external sources — promote X
-                    perplexity_weight = "LOW (returned irrelevant or no results)"
-                    x_weight = "ELEVATED — primary evidence source for this claim (Perplexity research was inconclusive)"
-                    # Count credible X sources for stronger guidance
-                    credible_x_sources = [
-                        s for s in x_analysis_data.get("external_sources", [])
-                        if s.get("credibility_tier") in ("primary", "secondary")
-                    ]
-                    if credible_x_sources:
-                        x_elevation_guidance = f"""
-CRITICAL — X SOURCES AS PRIMARY EVIDENCE:
-Primary research (Perplexity) found NO relevant results for this claim, but X analysis
-found {len(credible_x_sources)} credible external source(s) from recognized news outlets.
-You MUST evaluate these X-linked sources as your primary evidence:
-- If these credible news articles CONFIRM the claim → mark TRUE
-- Do NOT default to "Unverified" merely because Perplexity's search failed
-- Media reports from reputable outlets ARE sufficient evidence for widely-reported
-  government announcements, public events, and official statements
-- The question is: "Do credible sources confirm this?" — not "Did Perplexity find it?"
-"""
-                else:
-                    perplexity_weight = "LOW (returned irrelevant or no results)"
-                    x_weight = "LOW (no external sources found)"
+                # Build light X analysis summary (X evidence already fed into Perplexity)
+                x_summary = self._build_x_summary(x_analysis_data)
 
                 # Build structured context section
                 structured_context = f"""
@@ -284,7 +245,7 @@ IMPORTANT CONTEXT FOR VERDICT:
 """
 
                 verdict_prompt = f"""
-You are a professional fact-checker with expertise across multiple domains. Evaluate the truthfulness of this claim using ALL available evidence: the research data below, X-linked external sources, AND your own verified knowledge.
+You are a professional fact-checker with expertise across multiple domains. Evaluate the truthfulness of this claim using ALL available evidence: the research data below AND your own verified knowledge.
 
 ORIGINAL INPUT: "{claim_text}"
 
@@ -296,7 +257,7 @@ CLAIM METADATA:
 - Location: {location if location else "Not specified"}
 
 ===============================================================================
-PRIMARY RESEARCH (Perplexity Deep Search) - EVIDENCE WEIGHT: {perplexity_weight}
+RESEARCH (Perplexity Deep Search — includes X social media evidence as leads)
 ===============================================================================
 RESEARCH SUMMARY:
 {research_summary}
@@ -310,11 +271,7 @@ CREDIBLE SOURCES:
 RESEARCH LIMITATIONS:
 {research_limitations if research_limitations else "None reported"}
 
-===============================================================================
-{"X-LINKED EXTERNAL SOURCES" if not x_has_sources or perplexity_has_relevant else "X-LINKED EXTERNAL SOURCES (ELEVATED: Primary research was inconclusive)"} - EVIDENCE WEIGHT: {x_weight}
-===============================================================================
-{x_context}
-{x_elevation_guidance}
+X ANALYSIS NOTE: {x_summary}
 {press_release_context}
 ===============================================================================
 STEP 0: CLAIM CATEGORY CLASSIFICATION (do this FIRST)
@@ -350,10 +307,10 @@ STEP 1: EVIDENCE ASSESSMENT
 ===============================================================================
 
 FOR CATEGORY A (Specific Events):
-   - Evaluate research findings and X-linked sources for direct evidence
+   - Evaluate research findings for direct evidence
    - If research returned irrelevant results (gazette docs, homepage listings, unrelated
      documents), acknowledge this and do NOT treat them as evidence
-   - If X found credible external source links, treat them as valid evidence
+   - Note: X social media posts were used as research leads — their findings are included above
    - Check scope match: local events may not appear in national/international media
 
 FOR CATEGORY B (Established Knowledge):
@@ -385,7 +342,7 @@ STEP 2: VERDICT DETERMINATION
 
 ⚠️ UNVERIFIED - Use when:
 - [Category A] No relevant sources found for a specific event claim
-- [Category A] Research returned off-topic results and no X sources available
+- [Category A] Research returned off-topic results despite X social media leads
 - [Category B] RARELY — only if the claim is about obscure knowledge you cannot confidently verify
 - Scope mismatch: local event searched only in national/international media
 - Partial information: some parts confirmed, others cannot be verified
@@ -567,60 +524,39 @@ VERIFIED_SOURCES:
 
         return False
 
-    def _build_x_analysis_context(self, x_analysis_data: dict) -> str:
+    def _build_x_summary(self, x_analysis_data: dict) -> str:
         """
-        Build the X analysis context section for the verdict prompt.
+        Build a light X analysis summary for the verdict prompt.
+        X evidence is already baked into Perplexity's research, so this is just informational.
 
         Args:
             x_analysis_data (dict): X analysis results
 
         Returns:
-            str: Formatted X analysis context for the prompt
+            str: Brief summary of X analysis
         """
         if not x_analysis_data:
             return "X analysis was not performed."
 
-        # Get analysis note (summary of what was found)
-        analysis_note = x_analysis_data.get("analysis_note", "No X analysis available.")
-
-        # Check if there's an error
         if x_analysis_data.get("error"):
             return f"X analysis unavailable: {x_analysis_data.get('error')}"
 
-        # Check if no relevant posts were found
         if not x_analysis_data.get("has_relevant_posts", False):
-            return analysis_note
+            return x_analysis_data.get("analysis_note", "No relevant X posts found.")
 
-        # Build external sources section
-        external_sources = x_analysis_data.get("external_sources", [])
-        discussion_summary = x_analysis_data.get("discussion_summary", "")
+        posts_content = x_analysis_data.get("posts_content", [])
+        posts_analyzed = x_analysis_data.get("posts_analyzed", 0)
+        news_count = sum(1 for p in posts_content if p.get("priority", 3) <= 2)
+        public_count = sum(1 for p in posts_content if p.get("priority", 3) == 3)
 
-        context_parts = [analysis_note, ""]
+        summary = f"Found {posts_analyzed} posts."
+        if news_count > 0:
+            summary += f" {news_count} from news channels."
+        if public_count > 0:
+            summary += f" {public_count} from public accounts."
+        summary += " This evidence was provided to Perplexity for research."
 
-        if discussion_summary:
-            context_parts.append(f"Discussion Context: {discussion_summary}")
-            context_parts.append("")
-
-        if external_sources:
-            context_parts.append("External Sources Found via X:")
-            for source in external_sources:
-                domain = source.get("domain", "unknown")
-                url = source.get("url", "")
-                title = source.get("title", "")
-                description = source.get("description", "")
-                tier = source.get("credibility_tier", "unknown")
-
-                if title:
-                    line = f"- [{tier.upper()}] {domain}: {title}"
-                    if description:
-                        line += f" — {description[:150]}"
-                    context_parts.append(line)
-                else:
-                    context_parts.append(f"- [{tier.upper()}] {domain}: {url[:80]}...")
-        else:
-            context_parts.append("External Sources Found via X: None")
-
-        return "\n".join(context_parts)
+        return summary
 
     def _detect_press_release_indicators(self, claim_text: str) -> dict:
         """
@@ -718,8 +654,11 @@ VERIFIED_SOURCES:
         # Include X analysis data if available
         if x_analysis_data:
             external_sources = x_analysis_data.get("external_sources", [])
+            posts_content = x_analysis_data.get("posts_content", [])
+            news_posts = sum(1 for p in posts_content if p.get("priority", 3) <= 2)
             response["x_analysis"] = {
                 "posts_analyzed": x_analysis_data.get("posts_analyzed", 0),
+                "news_posts_found": news_posts,
                 "external_sources_found": len(external_sources),
                 "sources": [
                     {"url": s.get("url", ""), "domain": s.get("domain", ""), "credibility_tier": s.get("credibility_tier", "unknown")}

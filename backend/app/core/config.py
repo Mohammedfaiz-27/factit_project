@@ -20,7 +20,7 @@ PERPLEXITY_API_KEY = os.getenv("PERPLEXITY_API_KEY")
 # X (Twitter) Analysis Configuration
 X_BEARER_TOKEN = os.getenv("X_BEARER_TOKEN", "")
 X_ANALYSIS_ENABLED = os.getenv("X_ANALYSIS_ENABLED", "true").lower() == "true"
-X_SEARCH_LIMIT = int(os.getenv("X_SEARCH_LIMIT", "50"))
+X_SEARCH_LIMIT = int(os.getenv("X_SEARCH_LIMIT", "10"))
 
 # Server Configuration
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")
