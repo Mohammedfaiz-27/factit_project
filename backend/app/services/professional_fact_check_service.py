@@ -203,8 +203,13 @@ class ProfessionalFactCheckService:
                 sources_text = "\n".join([f"- {s}" for s in sources]) if sources else "No sources available"
                 entities_text = ", ".join(entities) if entities else "N/A"
 
-                # Build light X analysis summary (X evidence already fed into Perplexity)
+                # Build X analysis context for verdict
+                # Light summary when Perplexity succeeded; detailed posts when Perplexity failed
+                perplexity_has_relevant = self._assess_perplexity_relevance(research_data)
                 x_summary = self._build_x_summary(x_analysis_data)
+                x_news_evidence = ""
+                if not perplexity_has_relevant:
+                    x_news_evidence = self._build_x_news_evidence(x_analysis_data)
 
                 # Build structured context section
                 structured_context = f"""
@@ -274,6 +279,7 @@ RESEARCH LIMITATIONS:
 {research_limitations if research_limitations else "None reported"}
 
 X ANALYSIS NOTE: {x_summary}
+{x_news_evidence}
 {press_release_context}
 ===============================================================================
 STEP 0: CLAIM CATEGORY CLASSIFICATION (do this FIRST)
@@ -283,7 +289,8 @@ Classify this claim into ONE of these categories:
 CATEGORY A — SPECIFIC EVENT CLAIM:
    A recent or specific event, incident, or announcement (protest, accident, arrest,
    appointment, scheme launch, speech, court ruling, election result, etc.)
-   → These REQUIRE external source evidence (articles, press releases, official records)
+   → These REQUIRE source evidence (articles, press releases, official records,
+     OR credible news outlet reporting — including verified news channel X posts)
    → Your own knowledge is NOT sufficient — events need source confirmation
 
 CATEGORY B — ESTABLISHED KNOWLEDGE CLAIM:
@@ -559,6 +566,55 @@ VERIFIED_SOURCES:
         summary += " This evidence was provided to Perplexity for research."
 
         return summary
+
+    def _build_x_news_evidence(self, x_analysis_data: dict) -> str:
+        """
+        Build detailed X news evidence for the verdict prompt.
+        Only called when Perplexity failed to find relevant results — surfaces
+        credible news channel posts so Gemini can use them as evidence.
+
+        Returns empty string if no news channel posts exist.
+        """
+        if not x_analysis_data or not x_analysis_data.get("has_relevant_posts", False):
+            return ""
+
+        posts_content = x_analysis_data.get("posts_content", [])
+        news_posts = [p for p in posts_content if p.get("priority", 3) <= 2]
+
+        if not news_posts:
+            return ""
+
+        lines = [
+            "",
+            "===============================================================================",
+            "X NEWS CHANNEL EVIDENCE (Perplexity could not access/verify these — evaluate directly)",
+            "===============================================================================",
+            "The following posts are from RECOGNIZED NEWS OUTLETS on X. Perplexity's research",
+            "could not find or access the linked articles, but these news channels are credible",
+            "media sources whose reporting constitutes valid evidence.",
+            "",
+        ]
+
+        for p in news_posts:
+            text = p.get("text", "").replace("\n", " ")[:280]
+            handle = p.get("author_handle", "?")
+            date = p.get("date", "?")
+            category = p.get("author_category", "unknown")
+            label = "TAMIL NEWS" if category == "tamil_news" else "NATIONAL NEWS"
+            lines.append(f"- [{label}] @{handle} ({date}): \"{text}\"")
+
+        lines.append("")
+        lines.append("EVIDENCE EVALUATION RULES FOR NEWS CHANNEL POSTS:")
+        lines.append("- Reporting by recognized news outlets (Business Line, NDTV, Times of India,")
+        lines.append("  The Hindu, India Today, etc.) IS sufficient evidence for:")
+        lines.append("  * Statements/quotes attributed to ministers or officials")
+        lines.append("  * Government projections, data, or announcements")
+        lines.append("  * Event reports (inaugurations, launches, press conferences)")
+        lines.append("- Do NOT require an official gazette or press release when multiple credible")
+        lines.append("  news outlets are reporting the same claim.")
+        lines.append("- 'Source not accessible by Perplexity' ≠ 'no evidence exists'")
+
+        return "\n".join(lines)
 
     def _detect_press_release_indicators(self, claim_text: str) -> dict:
         """
