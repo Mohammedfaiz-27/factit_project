@@ -37,9 +37,12 @@ class ClaimStructuringService:
         if is_non_english and len(claim_text) > 200:
             print(f"[Structuring] Pre-translating long non-English text ({len(claim_text)} chars)...")
             translated = self.translate_to_english(claim_text)
-            if translated and translated != claim_text:
+            if translated and translated != claim_text and len(translated) > len(claim_text) * 0.2:
                 working_text = translated
                 print(f"[Structuring] Using English translation for structuring ({len(translated)} chars)")
+            else:
+                if translated and len(translated) <= len(claim_text) * 0.2:
+                    print(f"[Structuring] Translation too short ({len(translated)} vs {len(claim_text)} chars) — using original text")
 
         last_error = None
 

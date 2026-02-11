@@ -99,14 +99,25 @@ class FactCheckService:
             print(f"Extracted content (preview): {extracted_text[:200]}...\n")
 
             # Step 2: Combine extracted text with user's claim
-            if claim_text:
-                # User provided specific claim - use it as primary, extracted text as context
+            # Detect common trigger phrases that don't contain a real claim
+            trigger_phrases = {
+                "check this", "check", "fact check", "fact check this",
+                "verify", "verify this", "is this true", "is this real",
+                "is this fake", "true or false",
+            }
+            claim_is_trigger = claim_text and claim_text.strip().lower() in trigger_phrases
+
+            if claim_text and not claim_is_trigger:
+                # User provided a real claim - use it as primary, extracted text as context
                 combined_claim = f"{claim_text}\n\nContext from {media_type}: {extracted_text}"
                 print(f"[COMBINING] Using user's claim with {media_type} context")
             else:
-                # No user claim - use extracted text
+                # No real claim (empty or trigger phrase) - use extracted text directly
                 combined_claim = f"Claims from {media_type}: {extracted_text}"
-                print(f"[COMBINING] Using extracted text from {media_type} as claim")
+                if claim_is_trigger:
+                    print(f"[COMBINING] Trigger phrase '{claim_text}' detected — using extracted {media_type} text as claim")
+                else:
+                    print(f"[COMBINING] Using extracted text from {media_type} as claim")
 
             # Step 3: Pass to professional fact-checking service (includes Perplexity Deep Search)
             print(f"\n[FACT-CHECKING] Starting professional fact-check pipeline with Perplexity Deep Search...")

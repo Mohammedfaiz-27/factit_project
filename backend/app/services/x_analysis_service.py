@@ -99,6 +99,9 @@ class XAnalysisService:
         try:
             x_query = self._build_x_search_query(structured_claim, search_query)
 
+            if not x_query:
+                return self._no_results_response("")
+
             posts, users_map = self._search_posts(x_query)
 
             if not posts:
@@ -151,8 +154,15 @@ class XAnalysisService:
         if entities:
             entity_query = " ".join(entities[:2])
             query_parts.append(entity_query)
+        elif search_query:
+            # Use the Perplexity search query (already cleaned) as fallback
+            # Take first 4 significant words from it
+            words = [w for w in search_query.split() if len(w) > 3][:4]
+            query_parts.append(" ".join(words))
         else:
-            words = [w for w in claim.split() if len(w) > 3][:4]
+            # Last resort: extract words from claim, skipping boilerplate prefixes
+            skip_words = {"claims", "from", "image", "image:", "video", "video:", "audio", "audio:", "context"}
+            words = [w for w in claim.split() if len(w) > 3 and w.lower().rstrip(":") not in skip_words][:4]
             query_parts.append(" ".join(words))
 
         base_query = " ".join(query_parts)
@@ -166,6 +176,11 @@ class XAnalysisService:
                 if original_words:
                     regional_terms = " ".join(original_words)
                     base_query = regional_terms
+
+        # Validate base_query has substance before building final query
+        if len(base_query.strip()) < 3:
+            print("[X Analysis] Search query too short — skipping X search")
+            return ""
 
         # No has:links — we want ALL posts about the claim, not just ones with links
         x_query = f"{base_query} -is:retweet"

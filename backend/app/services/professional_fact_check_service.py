@@ -251,8 +251,12 @@ IMPORTANT CONTEXT FOR VERDICT:
      website/social media, or contact the phone numbers mentioned in the claim
 """
 
+                today_date = datetime.now().strftime("%B %d, %Y")
+
                 verdict_prompt = f"""
 You are a professional fact-checker with expertise across multiple domains. Evaluate the truthfulness of this claim using ALL available evidence: the research data below AND your own verified knowledge.
+
+TODAY'S DATE: {today_date}
 
 ORIGINAL INPUT: "{claim_text}"
 
