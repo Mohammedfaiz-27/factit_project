@@ -17,10 +17,11 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 # Perplexity API Configuration
 PERPLEXITY_API_KEY = os.getenv("PERPLEXITY_API_KEY")
 
-# X (Twitter) Analysis Configuration
-X_BEARER_TOKEN = os.getenv("X_BEARER_TOKEN", "")
+# X (Twitter) Analysis Configuration — RapidAPI Twttr API
+RAPIDAPI_KEY = os.getenv("RAPIDAPI_KEY", "")
+RAPIDAPI_HOST = os.getenv("RAPIDAPI_HOST", "twitter241.p.rapidapi.com")
 X_ANALYSIS_ENABLED = os.getenv("X_ANALYSIS_ENABLED", "true").lower() == "true"
-X_SEARCH_LIMIT = int(os.getenv("X_SEARCH_LIMIT", "15"))
+X_SEARCH_LIMIT = int(os.getenv("X_SEARCH_LIMIT", "20"))
 
 # Server Configuration
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")

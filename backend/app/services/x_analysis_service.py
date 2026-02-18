@@ -1,8 +1,8 @@
 """
-X (Twitter) Analysis Service
+X (Twitter) Analysis Service — RapidAPI Twttr API
 
-Analyzes X/Twitter for posts related to a claim, extracting post text, dates,
-and author information to feed as evidence into Perplexity research.
+Analyzes X/Twitter for posts related to a claim using the RapidAPI Twttr API
+(twitter241.p.rapidapi.com) Search Twitter V3 endpoint.
 
 Authors are classified by priority:
 1. Tamil news channels (highest priority)
@@ -12,9 +12,10 @@ Authors are classified by priority:
 External links are still extracted for backward compatibility.
 """
 
-from app.core.config import X_BEARER_TOKEN, X_ANALYSIS_ENABLED, X_SEARCH_LIMIT
+from app.core.config import RAPIDAPI_KEY, RAPIDAPI_HOST, X_ANALYSIS_ENABLED, X_SEARCH_LIMIT
 import requests
 import re
+import json
 from urllib.parse import urlparse
 from typing import List, Dict, Optional
 
@@ -23,15 +24,17 @@ class XAnalysisService:
     """
     Analyzes X (Twitter) for posts discussing a claim.
 
+    Uses RapidAPI Twttr API (Search Twitter V3) instead of official X API.
     Extracts post text, dates, and classifies authors by priority tier.
     Results are fed into Perplexity as research evidence.
     """
 
     def __init__(self):
         self.enabled = X_ANALYSIS_ENABLED
-        self.bearer_token = X_BEARER_TOKEN
+        self.rapidapi_key = RAPIDAPI_KEY
+        self.rapidapi_host = RAPIDAPI_HOST
         self.search_limit = X_SEARCH_LIMIT
-        self.base_url = "https://api.twitter.com/2"
+        self.base_url = f"https://{self.rapidapi_host}"
 
         # Tamil news X handles (priority 1)
         self.tamil_news_handles = {
@@ -81,8 +84,8 @@ class XAnalysisService:
             "livemint.com", "business-standard.com",
         }
 
-        if not self.bearer_token and self.enabled:
-            print("WARNING: X_BEARER_TOKEN not set. X analysis will use fallback mode.")
+        if not self.rapidapi_key and self.enabled:
+            print("WARNING: RAPIDAPI_KEY not set. X analysis will use fallback mode.")
 
     def analyze_claim(self, structured_claim: dict, search_query: str) -> dict:
         """
@@ -93,7 +96,7 @@ class XAnalysisService:
         if not self.enabled:
             return self._disabled_response()
 
-        if not self.bearer_token:
+        if not self.rapidapi_key:
             return self._fallback_analysis(structured_claim, search_query)
 
         try:
@@ -102,26 +105,26 @@ class XAnalysisService:
             if not x_query:
                 return self._no_results_response("")
 
-            posts, users_map = self._search_posts(x_query)
+            tweets = self._search_posts(x_query)
 
-            if not posts:
+            if not tweets:
                 return self._no_results_response(x_query)
 
             # Extract post content with author classification
-            posts_content = self._extract_posts_content(posts, users_map)
+            posts_content = self._extract_posts_content(tweets)
 
             # Extract and categorize external URLs (backward compat)
-            external_sources = self._extract_external_sources(posts)
+            external_sources = self._extract_external_sources(tweets)
 
             # Generate neutral discussion summary
-            discussion_summary = self._summarize_discussion(posts, posts_content, structured_claim)
+            discussion_summary = self._summarize_discussion(tweets, posts_content, structured_claim)
 
             # Generate analysis note
             analysis_note = self._generate_analysis_note(external_sources, posts_content)
 
             return {
                 "has_relevant_posts": True,
-                "posts_analyzed": len(posts),
+                "posts_analyzed": len(tweets),
                 "posts_content": posts_content,
                 "external_sources": external_sources,
                 "discussion_summary": discussion_summary,
@@ -141,7 +144,7 @@ class XAnalysisService:
 
     def _build_x_search_query(self, structured_claim: dict, search_query: str) -> str:
         """
-        Build an optimized search query for X API.
+        Build an optimized search query for RapidAPI.
         No language restriction; no has:links filter (we want ALL posts).
         """
         entities = structured_claim.get("entities", [])
@@ -155,12 +158,9 @@ class XAnalysisService:
             entity_query = " ".join(entities[:2])
             query_parts.append(entity_query)
         elif search_query:
-            # Use the Perplexity search query (already cleaned) as fallback
-            # Take first 4 significant words from it
             words = [w for w in search_query.split() if len(w) > 3][:4]
             query_parts.append(" ".join(words))
         else:
-            # Last resort: extract words from claim, skipping boilerplate prefixes
             skip_words = {"claims", "from", "image", "image:", "video", "video:", "audio", "audio:", "context"}
             words = [w for w in claim.split() if len(w) > 3 and w.lower().rstrip(":") not in skip_words][:4]
             query_parts.append(" ".join(words))
@@ -177,48 +177,40 @@ class XAnalysisService:
                     regional_terms = " ".join(original_words)
                     base_query = regional_terms
 
-        # Validate base_query has substance before building final query
         if len(base_query.strip()) < 3:
             print("[X Analysis] Search query too short — skipping X search")
             return ""
 
-        # No has:links — we want ALL posts about the claim, not just ones with links
-        x_query = f"{base_query} -is:retweet"
+        # RapidAPI search — no need for -is:retweet operator (use type=Top for relevance)
+        x_query = base_query.strip()
 
         if len(x_query) > 500:
             x_query = x_query[:500]
 
         return x_query
 
-    def _search_posts(self, query: str) -> tuple:
+    def _search_posts(self, query: str) -> List[dict]:
         """
-        Search X API for posts matching the query with author expansion.
+        Search RapidAPI Twttr API (Search Twitter V3) for posts matching the query.
 
-        Returns:
-            tuple: (list of tweets, dict mapping author_id -> user object)
+        Returns a flat list of parsed tweet dicts with keys:
+            text, created_at, author_handle, author_name, author_description, urls
         """
         headers = {
-            "Authorization": f"Bearer {self.bearer_token}",
-            "Content-Type": "application/json"
+            "x-rapidapi-key": self.rapidapi_key,
+            "x-rapidapi-host": self.rapidapi_host,
         }
-
-        # Cap at 15 — we only extract max 8 posts (3 Tamil + 3 National + 2 Common)
-        # Fetching more is wasted API credits. X API v2 minimum is 10.
-        max_results = min(self.search_limit, 15)
-        max_results = max(max_results, 10)  # X API minimum
 
         params = {
             "query": query,
-            "max_results": max_results,
-            "tweet.fields": "entities,created_at,author_id",
-            "expansions": "author_id",
-            "user.fields": "name,username,verified,description",
+            "type": "Top",
+            "count": min(self.search_limit, 20),
         }
 
-        print(f"[X Analysis] Searching for: {query[:80]}...")
+        print(f"[X Analysis] Searching RapidAPI for: {query[:80]}...")
 
         response = requests.get(
-            f"{self.base_url}/tweets/search/recent",
+            f"{self.base_url}/search-v3",
             headers=headers,
             params=params,
             timeout=15
@@ -226,27 +218,204 @@ class XAnalysisService:
 
         print(f"[X Analysis] Response status: {response.status_code}")
 
-        if response.status_code == 200:
-            data = response.json()
-            tweets = data.get("data", [])
+        if response.status_code != 200:
+            print(f"[X Analysis] API error: {response.status_code} - {response.text[:200]}")
+            return []
 
-            # Build user lookup map from includes
-            users_map = {}
-            includes = data.get("includes", {})
-            for user in includes.get("users", []):
-                users_map[user["id"]] = user
+        data = response.json()
 
-            print(f"[X Analysis] Found {len(tweets)} posts, {len(users_map)} unique authors")
-            return tweets, users_map
-        elif response.status_code == 401:
-            print("[X Analysis] Authentication failed - check bearer token")
-            return [], {}
-        elif response.status_code == 429:
-            print("[X Analysis] Rate limited")
-            return [], {}
-        else:
-            print(f"[X Analysis] API error: {response.status_code}")
-            return [], {}
+        # Parse the nested Twitter GraphQL-like response
+        tweets = self._parse_search_response(data)
+        print(f"[X Analysis] Parsed {len(tweets)} tweets from response")
+        return tweets
+
+    def _parse_search_response(self, data: dict) -> List[dict]:
+        """
+        Parse the deeply nested RapidAPI Search V3 response into flat tweet dicts.
+
+        The response structure is:
+        {
+            result: {
+                timeline_response: {
+                    timeline: {
+                        instructions: [
+                            { __typename: "TimelineAddEntries", entries: [...] }
+                        ]
+                    }
+                }
+            }
+        }
+
+        Each entry contains tweet data at various nesting levels.
+        """
+        tweets = []
+
+        try:
+            result = data.get("result", {})
+            timeline_response = result.get("timeline_response", result.get("timeline", {}))
+            timeline = timeline_response.get("timeline", timeline_response)
+            instructions = timeline.get("instructions", [])
+
+            for instruction in instructions:
+                entries = instruction.get("entries", [])
+                for entry in entries:
+                    tweet = self._extract_tweet_from_entry(entry)
+                    if tweet:
+                        tweets.append(tweet)
+
+        except Exception as e:
+            print(f"[X Analysis] Error parsing response: {e}")
+            # Log a snippet of the response structure for debugging
+            try:
+                keys = list(data.keys()) if isinstance(data, dict) else str(type(data))
+                print(f"[X Analysis] Response top-level keys: {keys}")
+            except:
+                pass
+
+        return tweets
+
+    def _extract_tweet_from_entry(self, entry: dict) -> Optional[dict]:
+        """
+        Extract tweet data from a timeline entry.
+
+        Handles RapidAPI Twttr v3 response structure:
+        - Tweet text in: tweet_result.details.full_text
+        - Author info in: tweet_result.core.user_results.result.core (name, screen_name)
+        - Author bio in: tweet_result.core.user_results.result.profile_bio.description
+        - URLs in: tweet_result.url_entities[]
+        - Created at in: tweet_result.details.created_at_ms (epoch ms)
+        """
+        try:
+            content = entry.get("content", entry)
+
+            # Find tweet_result via multiple possible paths
+            tweet_result = None
+
+            # Path A: content.itemContent.tweet_results.result (legacy Twitter API)
+            item_content = content.get("itemContent", content.get("item", {}).get("itemContent", {}))
+            if item_content:
+                tweet_result = item_content.get("tweet_results", {}).get("result", {})
+
+            # Path B: content.content.tweet_results.result (RapidAPI Twttr v3)
+            if not tweet_result:
+                inner_content = content.get("content", {})
+                if isinstance(inner_content, dict):
+                    tweet_result = inner_content.get("tweet_results", {}).get("result", {})
+
+            if not tweet_result:
+                # Path C: content.items[] (for modules/carousels)
+                items = content.get("items", [])
+                for item in items:
+                    tweet = self._extract_tweet_from_entry(item)
+                    if tweet:
+                        return tweet
+                return None
+
+            # Handle "TweetWithVisibilityResults" wrapper
+            if tweet_result.get("__typename") == "TweetWithVisibilityResults":
+                tweet_result = tweet_result.get("tweet", tweet_result)
+
+            # --- Extract tweet text ---
+            # RapidAPI v3: text in details.full_text
+            details = tweet_result.get("details", {})
+            text = details.get("full_text", "") if isinstance(details, dict) else ""
+
+            # Fallback: legacy.full_text (older API format)
+            if not text:
+                legacy = tweet_result.get("legacy", {})
+                if isinstance(legacy, dict):
+                    text = legacy.get("full_text", legacy.get("text", ""))
+
+            if not text:
+                return None
+
+            # --- Extract created_at ---
+            created_at_ms = details.get("created_at_ms", 0) if isinstance(details, dict) else 0
+            if created_at_ms:
+                from datetime import datetime, timezone
+                dt = datetime.fromtimestamp(created_at_ms / 1000, tz=timezone.utc)
+                created_at = dt.strftime("%a %b %d %H:%M:%S %z %Y")
+                date_short = dt.strftime("%Y-%m-%d")
+            else:
+                legacy = tweet_result.get("legacy", {})
+                created_at = legacy.get("created_at", "") if isinstance(legacy, dict) else ""
+                date_short = self._parse_twitter_date(created_at)
+
+            # --- Extract author info ---
+            # RapidAPI v3: core.user_results.result.core (name, screen_name)
+            core = tweet_result.get("core", {})
+            user_result = core.get("user_results", {}).get("result", {})
+            user_core = user_result.get("core", {})
+
+            author_handle = user_core.get("screen_name", "unknown")
+            author_name = user_core.get("name", "Unknown")
+
+            # Bio in profile_bio.description (v3) or user_result.legacy.description (older)
+            profile_bio = user_result.get("profile_bio", {})
+            author_description = profile_bio.get("description", "") if isinstance(profile_bio, dict) else ""
+            if not author_description:
+                user_legacy = user_result.get("legacy", {})
+                if isinstance(user_legacy, dict):
+                    author_description = user_legacy.get("description", "")
+
+            verified = user_result.get("verified", False)
+
+            # --- Extract URLs ---
+            urls = []
+            # RapidAPI v3: url_entities at tweet_result level
+            for url_entity in tweet_result.get("url_entities", []):
+                expanded = url_entity.get("expanded_url", url_entity.get("url", ""))
+                if expanded:
+                    urls.append({
+                        "expanded_url": expanded,
+                        "title": url_entity.get("title", ""),
+                        "description": url_entity.get("description", ""),
+                    })
+
+            # Fallback: legacy.entities.urls or details.hashtag_entities for URLs
+            if not urls:
+                legacy = tweet_result.get("legacy", {})
+                if isinstance(legacy, dict):
+                    entities = legacy.get("entities", {})
+                    for url_entity in entities.get("urls", []):
+                        expanded = url_entity.get("expanded_url", url_entity.get("url", ""))
+                        if expanded:
+                            urls.append({
+                                "expanded_url": expanded,
+                                "title": url_entity.get("title", ""),
+                                "description": url_entity.get("description", ""),
+                            })
+
+            return {
+                "text": text,
+                "created_at": created_at,
+                "date": date_short,
+                "author_handle": author_handle,
+                "author_name": author_name,
+                "author_description": author_description,
+                "verified": verified,
+                "urls": urls,
+            }
+
+        except Exception as e:
+            return None
+
+    def _parse_twitter_date(self, date_str: str) -> str:
+        """Parse Twitter date format to YYYY-MM-DD."""
+        if not date_str:
+            return ""
+
+        # Already ISO format (YYYY-MM-DD...)
+        if date_str[:4].isdigit() and len(date_str) >= 10:
+            return date_str[:10]
+
+        # Twitter format: "Wed Oct 10 20:19:24 +0000 2018"
+        try:
+            from datetime import datetime
+            dt = datetime.strptime(date_str, "%a %b %d %H:%M:%S %z %Y")
+            return dt.strftime("%Y-%m-%d")
+        except:
+            return date_str[:10] if len(date_str) >= 10 else date_str
 
     def _classify_author(self, username: str, description: str = "", verified: bool = False) -> tuple:
         """
@@ -260,15 +429,12 @@ class XAnalysisService:
         """
         handle_lower = username.lower() if username else ""
 
-        # Check Tamil news handles
         if handle_lower in self.tamil_news_handles:
             return "tamil_news", 1
 
-        # Check national news handles
         if handle_lower in self.national_news_handles:
             return "national_news", 2
 
-        # Secondary signal: check description for news keywords
         if description:
             desc_lower = description.lower()
             news_keywords = [
@@ -277,7 +443,6 @@ class XAnalysisService:
                 "நிருபர்", "ஊடகம்",
             ]
             if any(kw in desc_lower for kw in news_keywords):
-                # Check for Tamil-specific indicators
                 tamil_indicators = [
                     "tamil", "tamilnadu", "tamil nadu", "chennai",
                     "தமிழ்", "தமிழ்நாடு",
@@ -286,39 +451,27 @@ class XAnalysisService:
                     return "tamil_news", 1
                 return "national_news", 2
 
-        # Verified accounts with no news keywords are still common people
         return "common_people", 3
 
-    def _extract_posts_content(self, posts: List[dict], users_map: dict) -> List[dict]:
+    def _extract_posts_content(self, tweets: List[dict]) -> List[dict]:
         """
         Extract post text, date, and author info with priority classification.
 
-        Limits to top 15 posts: up to 5 Tamil news + 5 National news + 5 Common people
-        (fills from available if a category has fewer).
+        Limits to top 8 posts: up to 3 Tamil news + 3 National news + 2 Common people.
         """
         categorized = {"tamil_news": [], "national_news": [], "common_people": []}
 
-        for post in posts:
-            text = post.get("text", "")
-            created_at = post.get("created_at", "")
-            author_id = post.get("author_id", "")
+        for tweet in tweets:
+            author_handle = tweet.get("author_handle", "unknown")
+            author_description = tweet.get("author_description", "")
+            verified = tweet.get("verified", False)
 
-            # Look up author info
-            user = users_map.get(author_id, {})
-            author_name = user.get("name", "Unknown")
-            author_handle = user.get("username", "unknown")
-            description = user.get("description", "")
-            verified = user.get("verified", False)
-
-            category, priority = self._classify_author(author_handle, description, verified)
-
-            # Parse date to just YYYY-MM-DD if full ISO timestamp
-            date_short = created_at[:10] if created_at else ""
+            category, priority = self._classify_author(author_handle, author_description, verified)
 
             entry = {
-                "text": text,
-                "date": date_short,
-                "author_name": author_name,
+                "text": tweet.get("text", ""),
+                "date": tweet.get("date", ""),
+                "author_name": tweet.get("author_name", "Unknown"),
                 "author_handle": author_handle,
                 "author_category": category,
                 "priority": priority,
@@ -326,8 +479,6 @@ class XAnalysisService:
 
             categorized[category].append(entry)
 
-        # Take up to 3 from news categories, 2 from common people
-        # (fewer posts = lower Perplexity token cost)
         tamil = categorized["tamil_news"][:3]
         national = categorized["national_news"][:3]
         common = categorized["common_people"][:2]
@@ -340,23 +491,20 @@ class XAnalysisService:
 
         return result
 
-    def _extract_external_sources(self, posts: List[dict]) -> List[dict]:
-        """Extract and categorize external URLs from posts."""
+    def _extract_external_sources(self, tweets: List[dict]) -> List[dict]:
+        """Extract and categorize external URLs from tweets."""
         external_sources = []
         seen_domains = set()
 
-        for post in posts:
-            entities = post.get("entities", {})
-            urls = entities.get("urls", [])
-
-            for url_entity in urls:
+        for tweet in tweets:
+            for url_entity in tweet.get("urls", []):
                 expanded_url = url_entity.get("expanded_url", "")
 
                 if not expanded_url or "twitter.com" in expanded_url or "x.com" in expanded_url:
                     continue
 
                 if any(shortener in expanded_url for shortener in ["bit.ly", "t.co", "tinyurl"]):
-                    expanded_url = url_entity.get("unwound_url", expanded_url)
+                    continue
 
                 try:
                     parsed = urlparse(expanded_url)
@@ -404,12 +552,12 @@ class XAnalysisService:
 
         return "unknown"
 
-    def _summarize_discussion(self, posts: List[dict], posts_content: List[dict], structured_claim: dict) -> str:
+    def _summarize_discussion(self, tweets: List[dict], posts_content: List[dict], structured_claim: dict) -> str:
         """Generate a neutral summary of the X discussion."""
-        if not posts:
+        if not tweets:
             return "No relevant discussion found on X."
 
-        num_posts = len(posts)
+        num_posts = len(tweets)
         tamil_count = sum(1 for p in posts_content if p["author_category"] == "tamil_news")
         national_count = sum(1 for p in posts_content if p["author_category"] == "national_news")
         common_count = sum(1 for p in posts_content if p["author_category"] == "common_people")
@@ -493,7 +641,7 @@ class XAnalysisService:
             "posts_content": [],
             "external_sources": [],
             "discussion_summary": "",
-            "analysis_note": "X analysis requires API configuration. Proceeding with Perplexity research only.",
+            "analysis_note": "X analysis requires RapidAPI configuration. Proceeding with Perplexity research only.",
             "search_query_used": "",
             "fallback": True
         }
