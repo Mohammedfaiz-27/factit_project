@@ -238,6 +238,19 @@ button:active {
   font-size: 18px;
 }
 
+/* Sources list — no bullet dots */
+.sources-list {
+  padding-left: 8px !important;
+}
+
+.sources-list li {
+  padding-left: 0 !important;
+}
+
+.sources-list li:before {
+  content: none !important;
+}
+
 /* Input Text Specific Class */
 .input-text {
   padding: 12px 16px;

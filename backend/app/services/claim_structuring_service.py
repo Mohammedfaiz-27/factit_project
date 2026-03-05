@@ -239,6 +239,68 @@ Text: {text}"""
             print(f"Translation error: {e}")
             return text  # Return original on error
 
+    def classify_claim(self, structured_claim: dict) -> str:
+        """
+        Classify the claim into one of three categories: POLICY, EVENT, or GENERAL.
+        Uses the existing claim_type and geographic_scope to determine the category
+        without an extra LLM call.
+
+        POLICY: Official actions, laws, budgets, government decisions, elections,
+                appointments, regulations, taxes, schemes.
+        EVENT:  Local or real-world incident at a specific place and time
+                (protest, accident, arrest, fire, clash, strike).
+        GENERAL: Scientific facts, history, technology, definitions, broad knowledge
+                 not tied to a specific incident or official decision.
+
+        Returns:
+            str: One of "POLICY", "EVENT", "GENERAL"
+        """
+        claim_type = structured_claim.get("claim_type", "other")
+        claim_text = structured_claim.get("claim", "").lower()
+
+        # Direct mapping from existing claim_type
+        policy_types = {"government_scheme", "politics"}
+        event_types = {"protest_arrest", "accident_death", "crime"}
+
+        if claim_type in policy_types:
+            return "POLICY"
+        if claim_type in event_types:
+            return "EVENT"
+
+        # For ambiguous types, check claim text for signals
+        policy_signals = [
+            "budget", "tax", "gst", "election", "appointed", "governor",
+            "regulation", "scheme", "policy", "bill", "act", "law",
+            "amendment", "ordinance", "notification", "announced",
+            "minister", "cabinet", "parliament", "assembly", "lok sabha",
+            "rajya sabha", "commission", "committee", "allocation",
+        ]
+        event_signals = [
+            "protest", "accident", "fire", "clash", "strike", "blockade",
+            "arrested", "killed", "injured", "died", "collapsed",
+            "flood", "earthquake", "cyclone", "explosion", "derailed",
+        ]
+
+        policy_hits = sum(1 for s in policy_signals if s in claim_text)
+        event_hits = sum(1 for s in event_signals if s in claim_text)
+
+        if policy_hits > event_hits and policy_hits > 0:
+            return "POLICY"
+        if event_hits > policy_hits and event_hits > 0:
+            return "EVENT"
+
+        # health_science and heritage_environment can be either EVENT or GENERAL
+        # If it has a specific time/location, treat as EVENT; otherwise GENERAL
+        if claim_type in ("health_science", "heritage_environment"):
+            time_period = structured_claim.get("time_period", "")
+            geographic_scope = structured_claim.get("geographic_scope", "national")
+            if time_period and geographic_scope in ("local", "district"):
+                return "EVENT"
+            return "GENERAL"
+
+        # Default: GENERAL (timeless knowledge)
+        return "GENERAL"
+
     def create_search_query(self, structured_claim: dict) -> str:
         """
         Create an optimized search query from structured claim.

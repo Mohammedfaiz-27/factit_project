@@ -16,13 +16,42 @@ export default function FactCheckerResult({ result }) {
   const mediaType = result.media_type || null;
   const mediaFilename = result.media_filename || null;
   const extractedText = result.extracted_text || null;
-  const researchSummary = result.research_summary || null;
 
   // URL-specific fields
   const url = result.url || null;
   const articleTitle = result.article_title || null;
   const articleSource = result.article_source || null;
   const articlePreview = result.article_preview || null;
+
+  // Helper: extract domain from URL
+  const extractDomain = (urlStr) => {
+    try {
+      const u = new URL(urlStr.startsWith('http') ? urlStr : `https://${urlStr}`);
+      return u.hostname.replace('www.', '');
+    } catch {
+      return urlStr;
+    }
+  };
+
+  // Helper: render a source item as a clickable link or plain text
+  const renderSource = (source) => {
+    if (!source) return null;
+    const urlMatch = source.match(/(https?:\/\/[^\s)]+)/);
+    if (urlMatch) {
+      const sourceUrl = urlMatch[1];
+      const domain = extractDomain(sourceUrl);
+      // Strip the URL, brackets, and reference numbers like [1] from the label
+      const label = source.replace(urlMatch[0], '').replace(/[\[\]()]/g, '').replace(/^\s*\d+\s*/, '').trim();
+      // Only use label if it's meaningful (more than 2 chars, not just punctuation)
+      const meaningfulLabel = label.length > 2 && !/^[\d\s.—-]+$/.test(label) ? label : '';
+      return (
+        <a href={sourceUrl} target="_blank" rel="noopener noreferrer" style={{ color: '#4A90E2', textDecoration: 'none' }}>
+          {meaningfulLabel ? `${meaningfulLabel} — ${domain}` : domain}
+        </a>
+      );
+    }
+    return <span>{source}</span>;
+  };
 
   // Animation variants
   const containerVariants = {
@@ -151,13 +180,6 @@ export default function FactCheckerResult({ result }) {
           </motion.div>
         )}
 
-        {researchSummary && (
-          <motion.div className="result-section" variants={itemVariants}>
-            <strong>🔍 Research Summary:</strong>
-            <p>{renderTextWithLinks(researchSummary)}</p>
-          </motion.div>
-        )}
-
         {findings && findings.length > 0 && (
           <motion.div className="result-section" variants={itemVariants}>
             <strong>Key Findings:</strong>
@@ -179,7 +201,7 @@ export default function FactCheckerResult({ result }) {
         {sources && sources.length > 0 && (
           <motion.div className="result-section" variants={itemVariants}>
             <strong>Sources:</strong>
-            <ul>
+            <ul className="sources-list">
               {sources.map((source, index) => (
                 <motion.li
                   key={index}
@@ -187,7 +209,7 @@ export default function FactCheckerResult({ result }) {
                   animate={{ opacity: 1, x: 0 }}
                   transition={{ delay: 0.5 + index * 0.1 }}
                 >
-                  {renderTextWithLinks(source)}
+                  {renderSource(source)}
                 </motion.li>
               ))}
             </ul>

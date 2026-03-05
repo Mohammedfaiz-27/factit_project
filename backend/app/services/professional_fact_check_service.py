@@ -48,8 +48,11 @@ class ProfessionalFactCheckService:
         if cached_claim:
             return self._format_cached_response(cached_claim)
 
-        # Step 2: LLM Structuring
+        # Step 2: LLM Structuring + Classification
         structured_claim = self.structuring.structure_claim(claim_text)
+        claim_category = self.structuring.classify_claim(structured_claim)
+        structured_claim["claim_category"] = claim_category
+        print(f"[Pipeline] Claim classified as: {claim_category}")
         search_query = self.structuring.create_search_query(structured_claim)
 
         # Step 3: X Analysis → Perplexity Deep Research (sequential — X feeds into Perplexity)
@@ -222,6 +225,7 @@ STRUCTURED CLAIM ANALYSIS:
 
                 # Extract claim metadata for context-aware verdict
                 claim_type = structured_claim.get("claim_type", "other")
+                claim_category = structured_claim.get("claim_category", "GENERAL")
                 geographic_scope = structured_claim.get("geographic_scope", "national")
                 location = structured_claim.get("location", "")
                 research_limitations = research_data.get("research_limitations", "")
@@ -263,6 +267,7 @@ ORIGINAL INPUT: "{claim_text}"
 {structured_context}
 
 CLAIM METADATA:
+- Claim Category: {claim_category}
 - Claim Type: {claim_type.replace('_', ' ').title()}
 - Geographic Scope: {geographic_scope.upper()}
 - Location: {location if location else "Not specified"}
@@ -286,114 +291,164 @@ X ANALYSIS NOTE: {x_summary}
 {x_news_evidence}
 {press_release_context}
 ===============================================================================
-STEP 0: CLAIM CATEGORY CLASSIFICATION (do this FIRST)
-===============================================================================
-Classify this claim into ONE of these categories:
-
-CATEGORY A — SPECIFIC EVENT CLAIM:
-   A recent or specific event, incident, or announcement (protest, accident, arrest,
-   appointment, scheme launch, speech, court ruling, election result, etc.)
-   → These REQUIRE source evidence (articles, press releases, official records,
-     OR credible news outlet reporting — including verified news channel X posts)
-   → Your own knowledge is NOT sufficient — events need source confirmation
-
-CATEGORY B — ESTABLISHED KNOWLEDGE CLAIM:
-   A well-documented, widely-accepted fact about culture, history, geography, economics,
-   science, institutions, or education. Examples:
-   - "Tamil Nadu is known for Bharatanatyam and Carnatic music"
-   - "Tamil Nadu is a leading manufacturing state"
-   - "The Earth revolves around the Sun"
-   - "India's capital is New Delhi"
-   → These can be verified using your own training knowledge from textbooks,
-     encyclopedias, academic sources, and institutional records
-   → These do NOT need recent news articles — they are baseline knowledge
-   → If you are confident this is established knowledge, you may verify it directly
-
-CATEGORY C — MIXED CLAIM:
-   Contains both established facts and specific event details.
-   → Verify each component separately
-
-State which category this claim belongs to before proceeding.
-
-===============================================================================
-STEP 1: EVIDENCE ASSESSMENT
+CLAIM CATEGORY (pre-classified): {claim_category}
 ===============================================================================
 
-FOR CATEGORY A (Specific Events):
-   - Evaluate research findings for direct evidence
-   - If research returned irrelevant results (gazette docs, homepage listings, unrelated
-     documents), acknowledge this and do NOT treat them as evidence
+Category definitions:
+- POLICY: Official actions, laws, budgets, government decisions, elections, appointments,
+  regulations, taxes, schemes. → REQUIRE source evidence from official records, news reports,
+  or government announcements. Your own knowledge alone is NOT sufficient.
+- EVENT: Local or real-world incident at a specific place and time (protest, accident,
+  arrest, fire, clash, strike). → REQUIRE source evidence. Your own knowledge is NOT sufficient.
+- GENERAL: Scientific facts, history, technology, definitions, broad timeless knowledge.
+  → CAN be verified using your own training knowledge from textbooks, encyclopedias,
+  academic sources, and institutional records. Do NOT need recent news articles.
+
+===============================================================================
+STEP 1: CONTEXT EXTRACTION & SEARCH RELEVANCE VALIDATION
+===============================================================================
+
+FIRST, explicitly identify the claim's context:
+- Country: (e.g., India)
+- State/City: (e.g., Tamil Nadu, Chennai)
+- Institution/Organization: (e.g., Election Commission of India, RBI)
+- Person: (e.g., Finance Minister Thangam Thennarasu)
+- Date/Time relevance: (e.g., February 2026)
+
+THEN, validate research relevance:
+Check whether the retrieved sources match the SAME place, institution, person, and topic
+as the claim. Ask yourself:
+- Do the sources discuss the correct state/city? (e.g., claim about Tamil Nadu → sources about Tamil Nadu, NOT Goa or Kerala)
+- Do the sources discuss the correct institution/person?
+- Do the sources discuss the correct time period?
+- Do the sources discuss the correct topic/event?
+
+If the sources are about a DIFFERENT location, entity, or topic than the claim:
+→ Those sources are IRRELEVANT — do NOT use them as evidence for or against the claim
+→ Set RETRIEVAL_MATCH to "NO" and explain the mismatch
+→ This is a retrieval failure, NOT evidence that the claim is false or unverifiable
+
+If the sources match the claim's context:
+→ Set RETRIEVAL_MATCH to "YES"
+→ Proceed to evidence assessment
+
+===============================================================================
+STEP 2: EVIDENCE ASSESSMENT
+===============================================================================
+
+EVIDENCE HIERARCHY (always prioritize in this order):
+1. Official government / institutional records and press releases
+2. Reputed news organizations (Reuters, BBC, The Hindu, NDTV, Times of India, etc.)
+3. Research publications and academic sources
+4. Social media / X posts from verified news channels (lowest priority)
+Ignore unrelated trending topics even if keywords match.
+
+FOR POLICY claims:
+   - Evaluate research findings for official government records, gazette notifications, news reports
+   - If research returned irrelevant results (wrong location, wrong entity, unrelated documents),
+     do NOT treat them as evidence — note the mismatch
    - Note: X social media posts were used as research leads — their findings are included above
+   - Check scope match: state-level policies may not appear in national/international media
+
+FOR EVENT claims:
+   - Evaluate research findings for direct evidence of the incident
+   - If research returned irrelevant results (wrong location, wrong entity, homepage listings),
+     do NOT treat them as evidence — note the mismatch
    - Check scope match: local events may not appear in national/international media
 
-FOR CATEGORY B (Established Knowledge):
+FOR GENERAL claims:
    - You ARE authorized to verify these from your training knowledge
-   - If the claim is factually accurate based on well-documented academic, cultural,
-     historical, scientific, or economic knowledge, mark it TRUE
-   - Cite the TYPE of authoritative sources that document this (e.g., "documented in
-     NCERT textbooks, Encyclopaedia Britannica, academic literature, UNESCO records")
+   - You MUST state the specific verified fact, not just say "well-established" or "well-known"
+     Example: "The Election Commission of India defines 234 constituencies for Tamil Nadu Assembly"
+     NOT: "This is a well-established fact about Tamil Nadu"
+   - Always prefer PRIMARY authoritative sources over secondary news articles:
+     * Government/institutional body (Election Commission, RBI, ISRO) > news article
+     * Official records/legislation > textbook reference
+     * Example: Cite "Election Commission of India constituency delimitation records"
+       NOT "Times of India article mentioning 234 seats"
    - Do NOT mark established facts as "Unverified" simply because a web search
      didn't return a specific article — that is a search limitation, not factual uncertainty
    - Only mark established knowledge as FALSE if it is demonstrably wrong
 
-FOR CATEGORY C (Mixed Claims):
-   - Verify each component separately and report accordingly
+MANDATORY FOR ALL VERDICTS — PROVE, DON'T JUST ASSERT:
+You MUST show the verified fact and compare it with the claim before concluding.
+- For numbers/dates/amounts: "Claim says 234 seats → ECI delimitation records define 234 constituencies for TN Assembly → MATCH"
+- For events: "Claim says GST implemented in 2017 → The 101st Constitutional Amendment Act enabled GST, launched July 1, 2017 → CONFIRMED"
+- For knowledge: "Claim says TN Assembly has 234 seats → ECI records: 234 constituencies → MATCH"
+NEVER just say "this is true" or "this is well-known" — always state the specific verified fact.
 
 ===============================================================================
-STEP 2: VERDICT DETERMINATION
+STEP 3: VERDICT DETERMINATION
 ===============================================================================
 
 ✅ TRUE - Use when:
-- [Category A] Credible external sources explicitly CONFIRM the claim
-- [Category B] The claim is well-established knowledge that you can verify from authoritative sources (textbooks, encyclopedias, academic literature, government records, institutional data)
-- [Category C] All components are verified (some via sources, some via established knowledge)
+- [POLICY/EVENT] Credible external sources explicitly CONFIRM the claim (matching location/entity/topic)
+- [GENERAL] The claim is verified knowledge — you can confirm from authoritative sources
 
 ❌ FALSE - ONLY when:
 - Credible sources or established knowledge explicitly CONTRADICT the claim
 - There must be POSITIVE EVIDENCE that the claim is wrong
 - NEVER mark as FALSE because "no search results found"
+- NEVER mark as FALSE based on sources about a different location/entity
 
 ⚠️ UNVERIFIED - Use when:
-- [Category A] No relevant sources found for a specific event claim
-- [Category A] Research returned off-topic results despite X social media leads
-- [Category B] RARELY — only if the claim is about obscure knowledge you cannot confidently verify
-- Scope mismatch: local event searched only in national/international media
+- [POLICY/EVENT] Relevant sources were searched (correct location/entity) but no confirmation found
+- [GENERAL] RARELY — only if the claim is about obscure knowledge you cannot confidently verify
 - Partial information: some parts confirmed, others cannot be verified
+- IMPORTANT: NEVER output "Unverified" just because you failed to find relevant sources.
+  First ensure the search retrieved sources about the CORRECT location/entity/topic.
+  If sources were about the WRONG context, note it in the explanation as a search limitation.
 
 ===============================================================================
-STEP 3: EXPLANATION RULES
+STEP 4: EXPLANATION RULES
 ===============================================================================
+
+CONSISTENCY CHECK (do this BEFORE writing your response):
+- If STATUS is TRUE → EXPLANATION must contain the specific proof/source that confirms it
+  NEVER say TRUE and then write "no evidence was found" or "could not be verified"
+- If STATUS is FALSE → EXPLANATION must contain the specific fact that contradicts it
+- If STATUS is UNVERIFIED → EXPLANATION must NOT claim the fact is true or false
+  If you find yourself writing proof in an UNVERIFIED explanation, change the status to TRUE
 
 FOR TRUE VERDICTS:
-- [Category A] Cite the specific sources that confirm the claim
-- [Category B] State: "This is established [cultural/historical/economic/scientific] knowledge documented in [source types]." Then briefly explain why it's true.
+- [POLICY/EVENT] Cite the specific sources that confirm the claim
+- [GENERAL] State the verified fact from the primary authority, then confirm it matches the claim.
+  Example: "According to Election Commission of India records, Tamil Nadu Legislative Assembly has 234 constituencies. This matches the claim."
+  NOT: "This is a well-established fact." (too vague, proves nothing)
 
-FOR UNVERIFIED VERDICTS (Category A specific events only):
+FOR FALSE VERDICTS:
+- Cite the specific evidence that contradicts the claim
+- Show the comparison: "Claim states X, but verified records show Y"
+
+FOR UNVERIFIED VERDICTS (POLICY/EVENT claims only):
+- Confirm that sources about the CORRECT location/entity were searched
+- If sources were about the wrong context, note the mismatch in explanation
 - State what sources were searched and what was found
-- Recommend specific source types for verification
 - Use: "This claim could not be independently verified through the online sources accessible to this system."
 - NEVER use: "No credible sources were found" or "There is no evidence to support this claim"
 - For local events, note that absence of national media coverage is expected
 
-FOR FALSE VERDICTS:
-- Cite the specific evidence that contradicts the claim
-
 CRITICAL RULES:
-1. NEVER mark well-known cultural, historical, geographic, economic, or scientific facts as "Unverified" just because a web search didn't find articles. That is a SEARCH LIMITATION, not factual uncertainty.
-2. "No search results" for established knowledge = search failure, NOT evidence of falsehood
-3. For specific events: "no sources confirm X" = UNVERIFIED (not FALSE)
-4. When in doubt between TRUE and UNVERIFIED for established knowledge, lean TRUE if you are confident
-5. When in doubt between UNVERIFIED and FALSE for specific events, lean UNVERIFIED
+1. [GENERAL] NEVER mark well-known facts as "Unverified" just because a web search didn't find articles. That is a SEARCH LIMITATION, not factual uncertainty.
+2. "No search results" for GENERAL knowledge = search failure, NOT evidence of falsehood
+3. [POLICY/EVENT] "no sources confirm X" = UNVERIFIED (not FALSE) — but ONLY if sources were about the correct context
+4. If sources are about the WRONG location/entity, note it as a search limitation in your explanation
+5. When in doubt between TRUE and UNVERIFIED for GENERAL claims, lean TRUE if you are confident
+6. When in doubt between UNVERIFIED and FALSE for POLICY/EVENT, lean UNVERIFIED
+7. Always show verified facts and compare numerically/logically with the claim before concluding
 
 Provide:
-1. CATEGORY: [A/B/C] with brief justification
-2. STATUS: One of [✅ True, ❌ False, ⚠️ Unverified]
-3. EXPLANATION: A 2-4 sentence explanation following the rules above.
-4. KEY_FINDINGS: 3-5 bullet points summarizing the most important facts discovered during verification (from research data, X sources, AND/OR your own verified knowledge). These should be specific factual statements, not vague summaries.
-5. VERIFIED_SOURCES: List the specific sources that support your verdict. For Category A, cite the news articles or official sources. For Category B, cite authoritative reference types (e.g., "ISRO official mission page", "NCERT textbooks", "WHO guidelines"). Always provide source names — never leave this empty.
+1. CONTEXT: Country, State/City, Institution, Person, Date (extracted from claim)
+2. RETRIEVAL_MATCH: [YES/NO] — do the retrieved sources match the claim's context?
+   If NO, explain the mismatch briefly.
+3. STATUS: One of [✅ True, ❌ False, ⚠️ Unverified]
+4. EXPLANATION: Exactly 2-3 concise sentences. First sentence = verdict + key reason. Second sentence = supporting evidence or context. Do NOT include URLs in the explanation (those belong in VERIFIED_SOURCES). Do NOT repeat information from KEY_FINDINGS.
+5. KEY_FINDINGS: 3-5 bullet points of distinct, specific facts discovered during verification. Each finding must provide NEW information — never repeat what another finding already states. Never write "no results found" or "no specific articles" as a finding. If web research failed, provide useful verified facts from your own knowledge instead.
+6. VERIFIED_SOURCES: Always provide at least one source name or reference type. For POLICY/EVENT, cite news articles or official sources by name. For GENERAL, cite the PRIMARY authoritative body first (e.g., "Election Commission of India — constituency records", "GST Council / Ministry of Finance", "ISRO official mission records"), then secondary references if needed. If web research returned no relevant results, cite the authoritative knowledge sources you used. NEVER write "No sources found" or "No specific articles were found".
 
 Format your response EXACTLY as:
-CATEGORY: [A/B/C] - [brief justification]
+CONTEXT: Country: [country] | State/City: [state] | Institution: [institution] | Person: [person] | Date: [date]
+RETRIEVAL_MATCH: [YES/NO] - [brief explanation if NO]
 STATUS: [status]
 EXPLANATION: [explanation]
 KEY_FINDINGS:
@@ -411,7 +466,8 @@ VERIFIED_SOURCES:
                 # Parse the response
                 status = "⚠️ Unverified"
                 explanation = "Unable to verify this claim based on available information."
-                category = ""
+                claim_context = ""
+                retrieval_match = ""
                 gemini_findings = []
                 gemini_sources = []
 
@@ -419,9 +475,12 @@ VERIFIED_SOURCES:
                 current_section = None
                 for i, line in enumerate(lines):
                     stripped = line.strip()
-                    if stripped.startswith("CATEGORY:"):
-                        current_section = "category"
-                        category = stripped.replace("CATEGORY:", "").strip()
+                    if stripped.startswith("CONTEXT:"):
+                        current_section = "context"
+                        claim_context = stripped.replace("CONTEXT:", "").strip()
+                    elif stripped.startswith("RETRIEVAL_MATCH:"):
+                        current_section = "retrieval_match"
+                        retrieval_match = stripped.replace("RETRIEVAL_MATCH:", "").strip()
                     elif stripped.startswith("STATUS:"):
                         current_section = "status"
                         status = stripped.replace("STATUS:", "").strip()
@@ -442,9 +501,11 @@ VERIFIED_SOURCES:
                         # Explanation can span multiple lines
                         explanation += " " + stripped
 
-                if category:
-                    print(f"[Verdict] Claim category: {category}")
-                    print(f"[Verdict] Gemini findings: {len(gemini_findings)}, Gemini sources: {len(gemini_sources)}")
+                if claim_context:
+                    print(f"[Verdict] Claim context: {claim_context}")
+                if retrieval_match:
+                    print(f"[Verdict] Retrieval match: {retrieval_match}")
+                print(f"[Verdict] Gemini findings: {len(gemini_findings)}, Gemini sources: {len(gemini_sources)}")
 
                 # Use Perplexity sources if available, otherwise use Gemini's sources
                 final_sources = sources if sources else gemini_sources
@@ -455,7 +516,9 @@ VERIFIED_SOURCES:
                     "sources": final_sources,
                     "gemini_findings": gemini_findings,
                     "gemini_sources": gemini_sources,
-                    "claim_category": category
+                    "claim_category": claim_category,
+                    "claim_context": claim_context,
+                    "retrieval_match": retrieval_match
                 }
 
             except Exception as e:
@@ -696,10 +759,13 @@ VERIFIED_SOURCES:
             "status": verdict.get("status", "⚠️ Unverified"),
             "explanation": verdict.get("explanation", "No explanation available"),
             "sources": final_sources,
-            "research_summary": research_data.get("summary", ""),
             "findings": final_findings,
             "research_limitations": research_data.get("research_limitations", "")
         }
+
+        # Only include research_summary when Perplexity returned relevant results
+        if perplexity_relevant:
+            response["research_summary"] = research_data.get("summary", "")
 
         # Include structured claim data if available
         if structured_claim:
