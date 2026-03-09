@@ -70,9 +70,10 @@ LOCATION: {location if location else 'Not specified'}
 CRITICAL RESEARCH RULES:
 1. The absence of coverage from international or national English-language outlets does NOT mean a local event did not occur.
 2. District-level events in India are typically ONLY covered by regional language media and local reporters.
-3. DO NOT cite newspaper homepages or directories as "sources searched" — only cite sources with actual content about this claim.
-4. DO NOT cite completely unrelated documents as evidence. If your search returns irrelevant results, say so explicitly.
-5. NEVER confuse "listing newspapers that exist" with "finding coverage in those newspapers."
+3. SOURCE RELEVANCE MANDATE: DO NOT cite newspaper homepages, generic government portals (like chennai.nic.in, tn.gov.in), or directories as "sources". Only list URLs that point to a SPECIFIC article, document, or page discussing the claim.
+4. If your search returns only generic homepages without specific claim information, state explicitly: "Retrieved sources were generic and did not contain specific information."
+5. NEVER confuse "listing URLs that exist" with "finding coverage in those URLs."
+6. RECENCY MANDATE: For political news, local events, or policy announcements, ALWAYS prioritize the most recent articles (last 24h to 7d). Use your search engine's recency filters if necessary. Do not rely solely on old or historical articles if the claim sounds like breaking news.
 
 CLAIM CATEGORY HANDLING:
 A) For SPECIFIC EVENTS (protests, accidents, appointments, scheme launches):
@@ -208,54 +209,57 @@ RESEARCH_LIMITATIONS: [what sources were inaccessible or not searched that would
         ]) if location else False
 
         # Domain-specific source hierarchy
+        # NOTE: News reports and press releases are prioritized ABOVE gazette
+        # documents because policies/schemes are announced in news BEFORE
+        # being gazetted (lag of days to weeks).
         domain_sources = {
             "protest_arrest": {
-                "priority_1": "District police press releases, SP/Commissioner statements, FIR records",
-                "priority_2": "District Collector/administration statements and press notes",
-                "priority_3": "Regional language newspapers with district reporters (for Tamil Nadu: Dinamalar, Dinathanthi, Dinamani, Maalai Malar, Vikatan)",
-                "priority_4": "Regional TV news channels (for Tamil Nadu: Sun News, Puthiya Thalaimurai, Thanthi TV, Polimer News, News7 Tamil)",
-                "priority_5": "State-level and national media (The Hindu, The New Indian Express, NDTV, India Today)",
+                "priority_1": "Tamil Nadu news channels and newspapers: Dinamalar, Dinathanthi (Daily Thanthi), Dinamani, Maalai Malar, Vikatan, Tamil Murasu, Kumudham, Ananda Vikatan, Junior Vikatan, Nakkheeran, Kumudam Reporter, Thuglak, DT Next, The New Indian Express (TN edition), The Hindu (TN section)",
+                "priority_2": "Tamil Nadu TV news channels: Sun News, Puthiya Thalaimurai, Thanthi TV, Polimer News, News7 Tamil, Kalaignar TV News, Jaya TV News, News18 Tamil Nadu, Captain News, Vasanth TV, Raj News Tamil, Lotus News, Malai Murasu TV, Adithya TV, Peppers TV",
+                "priority_3": "District police press releases, SP/Commissioner statements, FIR records, District Collector/administration statements",
+                "priority_4": "Wire services (PTI, ANI), state-level and national media (NDTV, India Today, Times of India)",
+                "priority_5": "Tamil online news portals: Oneindia Tamil, Samayam Tamil, Tamil Guardian, Asianet News Tamil, ABP Nadu, Zee Tamil News, News Tamil 24x7",
             },
             "accident_death": {
-                "priority_1": "FIR records, police station reports, traffic police statements",
-                "priority_2": "Hospital statements, government hospital records, district medical officer",
-                "priority_3": "District-level Tamil/regional language newspapers with local reporters",
-                "priority_4": "Regional TV news (often first to report accidents with footage)",
-                "priority_5": "State-level media, PTI/ANI wire service reports",
+                "priority_1": "Tamil Nadu news channels: Sun News, Puthiya Thalaimurai, Thanthi TV, Polimer News, News7 Tamil (TV channels are often FIRST to report accidents with footage)",
+                "priority_2": "Tamil newspapers: Dinamalar, Dinathanthi, Dinamani, Maalai Malar, DT Next, Tamil Murasu with district reporters",
+                "priority_3": "FIR records, police station reports, traffic police statements, hospital statements",
+                "priority_4": "State-level media, PTI/ANI wire service reports, The Hindu, TNIE",
+                "priority_5": "Tamil online portals: Oneindia Tamil, Samayam Tamil, ABP Nadu, News18 Tamil Nadu",
             },
             "government_scheme": {
-                "priority_1": "Official department notifications and government orders (G.O.s)",
-                "priority_2": "Government gazette notifications, department websites (e.g., tahdco.tn.gov.in, tn.gov.in)",
-                "priority_3": "District Collectorate press releases and official social media",
-                "priority_4": "PIB India releases, state government press releases",
-                "priority_5": "Regional language newspapers covering government announcements, national media",
+                "priority_1": "Tamil Nadu news articles and reports: The Hindu (Tamil Nadu section), The New Indian Express (TN edition), DT Next, Dinamalar, Dinathanthi, Dinamani, Times of India (Chennai edition), Deccan Chronicle (Chennai), Business Line, Financial Express",
+                "priority_2": "PIB India releases, Tamil Nadu state government press releases, CM press conferences, minister statements reported in media",
+                "priority_3": "Tamil TV news coverage: Sun News, Puthiya Thalaimurai, Thanthi TV, Polimer News, News7 Tamil, News18 Tamil Nadu",
+                "priority_4": "District Collectorate press releases, official social media, department websites (tn.gov.in)",
+                "priority_5": "Government gazette notifications and official G.O.s (NOTE: gazettes often lag behind announcements by days to weeks — absence from gazette does NOT mean the policy is false)",
             },
             "heritage_environment": {
-                "priority_1": "ASI (Archaeological Survey of India) or State Archaeology Department statements",
-                "priority_2": "Forest Department, State Pollution Control Board, or relevant regulatory body",
+                "priority_1": "Tamil Nadu news coverage: The Hindu, TNIE, Dinamalar, Dinathanthi, Dinamani, Vikatan reporting on heritage/environment",
+                "priority_2": "ASI (Archaeological Survey of India) or State Archaeology Department statements, Forest Department",
                 "priority_3": "Expert statements from historians, archaeologists, environmental scientists",
                 "priority_4": "Heritage/environment journalism outlets, specialized publications",
-                "priority_5": "Regional and national media coverage",
+                "priority_5": "Regional TV news channels (Sun News, Puthiya Thalaimurai, Thanthi TV) and national media",
             },
             "politics": {
-                "priority_1": "Official party statements, Election Commission records",
-                "priority_2": "PTI, ANI wire services",
-                "priority_3": "Major national newspapers and TV channels",
-                "priority_4": "Regional language media for local politics",
-                "priority_5": "Government gazettes for policy/legislative claims",
+                "priority_1": "Tamil Nadu news media: Dinamalar, Dinathanthi, Dinamani, The Hindu, TNIE, DT Next, Vikatan, Nakkheeran, Thuglak for TN politics",
+                "priority_2": "Tamil TV news: Sun News, Puthiya Thalaimurai, Thanthi TV, Polimer News, News7 Tamil, News18 Tamil Nadu, Kalaignar TV",
+                "priority_3": "PTI, ANI wire services, official party statements",
+                "priority_4": "National media (NDTV, India Today, Times of India), Election Commission records",
+                "priority_5": "Tamil online news: Oneindia Tamil, Samayam Tamil, ABP Nadu, Tamil Guardian",
             },
             "crime": {
-                "priority_1": "Police press releases, FIR records, court records",
-                "priority_2": "District-level and regional media crime reporting",
-                "priority_3": "National media for high-profile cases",
-                "priority_4": "Court websites (ecourts.gov.in) for legal proceedings",
-                "priority_5": "Wire services (PTI, ANI)",
+                "priority_1": "Tamil Nadu crime reporting: Dinamalar, Dinathanthi, Nakkheeran (known for crime journalism), Dinamani, DT Next",
+                "priority_2": "Tamil TV news crime coverage: Sun News, Puthiya Thalaimurai, Thanthi TV, Polimer News, News7 Tamil",
+                "priority_3": "Police press releases, FIR records, court records, ecourts.gov.in",
+                "priority_4": "National media for high-profile cases (NDTV, India Today, The Hindu)",
+                "priority_5": "Wire services (PTI, ANI), fact-checking organizations",
             },
             "health_science": {
-                "priority_1": "WHO, ICMR, relevant health ministry statements",
-                "priority_2": "Peer-reviewed journals (PubMed, Nature, Lancet)",
-                "priority_3": "Institutional press releases (hospitals, universities)",
-                "priority_4": "Science/health journalists at major outlets",
+                "priority_1": "WHO, ICMR, relevant health ministry statements, peer-reviewed journals",
+                "priority_2": "Tamil Nadu health news: The Hindu, TNIE, Dinamalar reporting on health/science, DT Next health section",
+                "priority_3": "Tamil TV health coverage: Sun News, Puthiya Thalaimurai, News7 Tamil health segments",
+                "priority_4": "Science/health journalists at major outlets, institutional press releases",
                 "priority_5": "Fact-checking organizations (Alt News, Boom Live)",
             },
         }
@@ -279,9 +283,12 @@ IMPORTANT SCOPE NOTE: This is a {geographic_scope.upper()}-level claim. For {geo
 
             if is_tamil_nadu:
                 scope_note += """
-- For Tamil Nadu specifically, search: Dinamalar (dinamalar.com), Dinathanthi (dailythanthi.com), Dinamani (dinamani.com), Maalai Malar (maalaimalar.com), Vikatan (vikatan.com)
-- Tamil TV: Sun News, Puthiya Thalaimurai, Thanthi TV, Polimer News, News7 Tamil
-- Also check: The New Indian Express (Tamil Nadu edition), The Hindu (Tamil Nadu section), DT Next"""
+- For Tamil Nadu specifically, search ALL of these news sources:
+  NEWSPAPERS: Dinamalar (dinamalar.com), Dinathanthi/Daily Thanthi (dailythanthi.com), Dinamani (dinamani.com), Maalai Malar (maalaimalar.com), Tamil Murasu, Kumudham, The Hindu Tamil (tamil.thehindu.com)
+  MAGAZINES: Vikatan (vikatan.com), Ananda Vikatan, Junior Vikatan, Nakkheeran (nakkheeran.in), Kumudam Reporter, Thuglak
+  TV CHANNELS: Sun News, Puthiya Thalaimurai (puthiyathalaimurai.com), Thanthi TV (thanthitv.com), Polimer News (polimernews.com), News7 Tamil (news7tamil.live), Kalaignar TV News, Captain News, News18 Tamil Nadu, Jaya TV News, Raj News Tamil
+  ENGLISH DAILIES (TN editions): The Hindu, The New Indian Express, DT Next (dtnext.in), Deccan Chronicle Chennai, Times of India Chennai, Business Line
+  ONLINE PORTALS: Oneindia Tamil (tamil.oneindia.com), Samayam Tamil (tamil.samayam.com), ABP Nadu, Asianet News Tamil, Zee Tamil News, News Tamil 24x7, Tamil Guardian"""
 
         guidance = f"""
 DOMAIN-SPECIFIC SOURCE HIERARCHY (search in this priority order):
@@ -417,7 +424,8 @@ DOMAIN-SPECIFIC SOURCE HIERARCHY (search in this priority order):
             "summary": f"Unable to perform deep research for: {search_query}. Perplexity API not configured.",
             "findings": [
                 "Deep research requires Perplexity API key",
-                "Please configure PERPLEXITY_API_KEY in your .env file"
+                "Please configure PERPLEXITY_API_KEY in your .env file",
+                "please check you perplexity api key credits"
             ],
             "sources": []
         }

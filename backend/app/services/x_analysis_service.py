@@ -37,24 +37,39 @@ class XAnalysisService:
         self.base_url = f"https://{self.rapidapi_host}"
 
         # Tamil news X handles (priority 1)
+        # Comprehensive list: all major TN newspapers, TV channels,
+        # magazines, online portals, and journalist accounts
         self.tamil_news_handles = {
-            "dinamaborig", "dailythanthi", "news7tamil", "pttvonlinenews",
-            "thanthitv", "sunnewstamil", "polimernews", "kaborimedia",
-            "aborathamil", "dinamani", "maalaimalar", "vikaborig",
-            "paboriyathalaim", "daborext", "news18tamilnadu", "newsaboramil",
-            "jaboramilnadu", "caborewstamil", "newsjtamil", "aborpnews",
-            "hinduaboramil", "onaboriatamil",
+            # Major Tamil newspapers
+            "dinamaborig", "dailythanthi", "dinamani", "maalaimalar",
+            # Tamil magazines and weeklies
+            "vikaborig", "newsjtamil",
+            # Tamil TV news channels
+            "sunnewstamil", "pttvonlinenews", "paboriyathalaim",
+            "thanthitv", "polimernews", "news7tamil",
+            "kaborimedia", "caborewstamil",
+            "jaboramilnadu", "news18tamilnadu",
+            # English dailies with TN focus
+            "daborext", "neaborianexp", "hinduaboramil",
+            "the_hindu",
+            # Tamil online portals
+            "onaboriatamil", "aborathamil", "newsaboramil",
+            "aborpnews",
+            # Tamil YouTube / digital-first news
+            "taborilnewsdesk", "taborilflashnews",
         }
 
         # National news X handles (priority 2)
         self.national_news_handles = {
-            "ndtv", "the_hindu", "indiatoday", "timesofindia",
+            "ndtv", "indiatoday", "timesofindia",
             "htaborig", "indianexpress", "pti_news", "ani",
             "news18india", "republic", "ababorews", "zeenews",
             "theprint", "scroll_in", "thequint", "livemint",
             "baborandardbiz", "deccanherald", "neaborianexp",
             "oneindia", "firstpost", "outlookindia", "theweek",
             "ndtvindia", "aaborak", "baborbc_india",
+            # Business / financial
+            "aborusinessline", "financialxpress",
         }
 
         # Credibility tiers for linked domains
@@ -63,6 +78,8 @@ class XAnalysisService:
             "bbc.com", "bbc.co.uk", "npr.org", "pbs.org",
             "gov", "gov.uk", "gov.in", "europa.eu", "un.org", "who.int",
             "edu", "ac.uk", "nature.com", "sciencedirect.com", "pubmed.ncbi.nlm.nih.gov",
+            # Indian government press release portal
+            "pib.gov.in",
         }
 
         self.secondary_sources = {
@@ -73,15 +90,22 @@ class XAnalysisService:
             "ndtv.com", "indiatoday.in",
             "pti.in", "ani.in",
             "snopes.com", "factcheck.org", "politifact.com", "altnews.in",
+            # Tamil Nadu newspapers (online)
             "dinamalar.com", "dailythanthi.com", "dinamani.com", "maalaimalar.com",
             "vikatan.com", "news7tamil.live", "puthiyathalaimurai.com",
             "polimernews.com", "dtnext.in",
+            "tamil.thehindu.com", "nakkheeran.in", "tamilmurasu.com.sg",
+            # Tamil online portals
+            "tamil.oneindia.com", "tamil.samayam.com",
+            "newsglitz.com", "tamilguardian.com",
+            # National / regional media
             "news18.com", "aajtak.in", "dainikbhaskar.com",
             "eenadu.net", "mathrubhumi.com", "manoramaonline.com",
             "deccanherald.com", "deccanchronicle.com",
             "newindianexpress.com", "oneindia.com",
             "thequint.com", "scroll.in", "theprint.in",
             "livemint.com", "business-standard.com",
+            "thehindubusinessline.com", "financialexpress.com",
         }
 
         if not self.rapidapi_key and self.enabled:
@@ -439,13 +463,21 @@ class XAnalysisService:
             desc_lower = description.lower()
             news_keywords = [
                 "news", "media", "channel", "reporter", "journalist",
-                "newspaper", "editor", "correspondent", "செய்தி",
-                "நிருபர்", "ஊடகம்",
+                "newspaper", "editor", "correspondent", "bureau",
+                "செய்தி", "நிருபர்", "ஊடகம்", "பத்திரிகை",
             ]
             if any(kw in desc_lower for kw in news_keywords):
                 tamil_indicators = [
                     "tamil", "tamilnadu", "tamil nadu", "chennai",
-                    "தமிழ்", "தமிழ்நாடு",
+                    "coimbatore", "madurai", "trichy", "salem",
+                    "tirunelveli", "erode", "vellore", "thanjavur",
+                    "dindigul", "kanchipuram", "tiruppur", "cuddalore",
+                    "krishnagiri", "dharmapuri", "nilgiris", "namakkal",
+                    "perambalur", "pudukkottai", "karur", "ariyalur",
+                    "nagapattinam", "ramanathapuram", "sivaganga",
+                    "virudhunagar", "theni", "tenkasi", "tirupattur",
+                    "ranipet", "chengalpattu", "kallakurichi", "villupuram",
+                    "தமிழ்", "தமிழ்நாடு", "சென்னை",
                 ]
                 if any(ind in desc_lower for ind in tamil_indicators):
                     return "tamil_news", 1

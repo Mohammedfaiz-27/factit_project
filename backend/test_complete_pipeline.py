@@ -18,9 +18,9 @@ def test_complete_pipeline():
     service = ProfessionalFactCheckService()
 
     test_claims = [
+        "Tamilaga Vettri Kazhagam leader Vijay announced a new political alliance today in Tamil Nadu",
         "did elon talk about tesla launching robotaxi next year?",
-        "The Earth is flat",
-        "Biden won the 2020 election"
+        "The Earth is flat"
     ]
 
     print("=" * 80)
