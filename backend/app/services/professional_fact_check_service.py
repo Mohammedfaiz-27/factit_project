@@ -80,7 +80,7 @@ class ProfessionalFactCheckService:
         )
 
         # Step 5: Database Storage
-        formatted_response = self._format_response(claim_text, final_result, research_data, structured_claim, x_analysis_data)
+        formatted_response = self._format_response(claim_text, final_result, research_data, structured_claim, x_analysis_data, response_language=response_language)
 
         # Only cache if research was successful (don't cache API failures)
         research_summary = research_data.get("summary", "")
@@ -950,7 +950,19 @@ VERIFIED_SOURCES:
             "indicator_count": len(indicators)
         }
 
-    def _format_response(self, claim_text: str, verdict: dict, research_data: dict, structured_claim: dict = None, x_analysis_data: dict = None) -> dict:
+    def _translate_to_tamil(self, text: str) -> str:
+        """Translate a given English text to Tamil using Gemini."""
+        try:
+            chat = self.client.chats.create(model=self.model)
+            response = chat.send_message(
+                f"Translate the following text to Tamil. Return only the translated text, nothing else:\n\n{text}"
+            )
+            return response.text.strip()
+        except Exception as e:
+            print(f"[Translation] Failed to translate to Tamil: {e}")
+            return text  # Return original if translation fails
+
+    def _format_response(self, claim_text: str, verdict: dict, research_data: dict, structured_claim: dict = None, x_analysis_data: dict = None, response_language: str = "English") -> dict:
         """
         Format the final response in a clean, human-readable style.
 
@@ -976,6 +988,11 @@ VERIFIED_SOURCES:
         final_findings = perplexity_findings if (perplexity_findings and perplexity_relevant) else gemini_findings
         final_sources = perplexity_sources if (perplexity_sources and perplexity_relevant) else gemini_sources
 
+        # Translate Perplexity content to Tamil if input was Tamil
+        if response_language == "Tamil":
+            if perplexity_findings and perplexity_relevant:
+                final_findings = [self._translate_to_tamil(f) for f in final_findings]
+
         response = {
             "claim_text": claim_text,
             "status": verdict.get("status", "⚠️ Unverified"),
@@ -987,7 +1004,10 @@ VERIFIED_SOURCES:
 
         # Only include research_summary when Perplexity returned relevant results
         if perplexity_relevant:
-            response["research_summary"] = research_data.get("summary", "")
+            summary = research_data.get("summary", "")
+            if response_language == "Tamil" and summary:
+                summary = self._translate_to_tamil(summary)
+            response["research_summary"] = summary
 
         # Include structured claim data if available
         if structured_claim:
