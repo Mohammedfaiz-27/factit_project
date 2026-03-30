@@ -35,6 +35,13 @@ class ProfessionalFactCheckService:
         self.client = genai.Client(api_key=GEMINI_API_KEY)
         self.model = GEMINI_MODEL
 
+    def _detect_language(self, text: str) -> str:
+        """Detect if the input text is Tamil or English."""
+        tamil_chars = re.findall(r'[\u0B80-\u0BFF]', text)
+        if len(tamil_chars) >= 3:
+            return "Tamil"
+        return "English"
+
     def check_fact(self, claim_text: str) -> dict:
         """
         Execute the complete professional fact-checking pipeline.
@@ -50,6 +57,10 @@ class ProfessionalFactCheckService:
         if cached_claim:
             return self._format_cached_response(cached_claim)
 
+        # Detect input language for response language matching
+        response_language = self._detect_language(claim_text)
+        print(f"[Pipeline] Detected input language: {response_language}")
+
         # Step 2: LLM Structuring + Classification
         structured_claim = self.structuring.structure_claim(claim_text)
         claim_category = self.structuring.classify_claim(structured_claim)
@@ -64,7 +75,8 @@ class ProfessionalFactCheckService:
 
         # Step 4: Generate Final Result (with combined research context)
         final_result = self._generate_verdict(
-            claim_text, structured_claim, research_data, x_analysis_data, news_data=news_data
+            claim_text, structured_claim, research_data, x_analysis_data, news_data=news_data,
+            response_language=response_language
         )
 
         # Step 5: Database Storage
@@ -196,7 +208,7 @@ class ProfessionalFactCheckService:
 
         return research_data, x_analysis_data, news_data
 
-    def _generate_verdict(self, claim_text: str, structured_claim: dict, research_data: dict, x_analysis_data: dict = None, max_retries: int = 3, news_data: dict = None) -> dict:
+    def _generate_verdict(self, claim_text: str, structured_claim: dict, research_data: dict, x_analysis_data: dict = None, max_retries: int = 3, news_data: dict = None, response_language: str = "English") -> dict:
         """
         Generate the final verdict based on research data and X analysis.
 
@@ -287,9 +299,15 @@ IMPORTANT CONTEXT FOR VERDICT:
 
                 today_date = datetime.now().strftime("%B %d, %Y")
 
+                language_instruction = ""
+                if response_language == "Tamil":
+                    language_instruction = """
+LANGUAGE INSTRUCTION: The user submitted this claim in Tamil. You MUST write your entire response in Tamil — including EXPLANATION, KEY_FINDINGS, and VERIFIED_SOURCES descriptions. Keep the field labels (STATUS:, EXPLANATION:, KEY_FINDINGS:, etc.) in English exactly as shown in the format below, but all content/values must be in Tamil.
+"""
+
                 verdict_prompt = f"""
 You are a professional fact-checker with expertise across multiple domains. Evaluate the truthfulness of this claim using ALL available evidence: the research data below AND your own verified knowledge.
-
+{language_instruction}
 TODAY'S DATE: {today_date}
 
 ORIGINAL INPUT: "{claim_text}"
