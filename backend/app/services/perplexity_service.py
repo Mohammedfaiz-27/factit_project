@@ -30,7 +30,7 @@ class PerplexityService:
             dict: Research results with findings and sources
         """
         if not self.api_key:
-            return self._fallback_research(search_query)
+            return self._fallback_research(search_query, reason="API key not configured. Set PERPLEXITY_API_KEY in .env")
 
         try:
             headers = {
@@ -163,16 +163,22 @@ RESEARCH_LIMITATIONS: [what sources were inaccessible or not searched that would
                     print(f"[Perplexity] DEBUG - Has bullet (-): {'-' in research_text}")
 
                 return parsed_result
+            elif response.status_code == 401:
+                print(f"[Perplexity] API error: 401 Unauthorized")
+                return self._fallback_research(search_query, reason="Invalid or expired API key (401 Unauthorized). Check your PERPLEXITY_API_KEY credits.")
+            elif response.status_code == 429:
+                print(f"[Perplexity] API error: 429 Rate limit")
+                return self._fallback_research(search_query, reason="Rate limit exceeded (429). Perplexity API quota reached.")
             else:
                 print(f"[Perplexity] API error: {response.status_code} - {response.text}")
-                return self._fallback_research(search_query)
+                return self._fallback_research(search_query, reason=f"API returned error {response.status_code}")
 
         except requests.exceptions.Timeout:
             print("Perplexity API timeout")
-            return self._fallback_research(search_query)
+            return self._fallback_research(search_query, reason="Request timed out after 30s")
         except Exception as e:
             print(f"Perplexity research error: {str(e)}")
-            return self._fallback_research(search_query)
+            return self._fallback_research(search_query, reason=str(e))
 
     def _get_source_guidance(self, claim_type: str, geographic_scope: str, location: str) -> str:
         """
@@ -410,22 +416,17 @@ DOMAIN-SPECIFIC SOURCE HIERARCHY (search in this priority order):
             "research_limitations": research_limitations.strip()
         }
 
-    def _fallback_research(self, search_query: str) -> dict:
+    def _fallback_research(self, search_query: str, reason: str = "API unavailable") -> dict:
         """
         Fallback research when Perplexity API is unavailable.
-
-        Args:
-            search_query (str): Search query
-
-        Returns:
-            dict: Basic research structure
+        Returns an api_error field instead of fake findings.
         """
         return {
-            "summary": f"Unable to perform deep research for: {search_query}. Perplexity API not configured.",
-            "findings": [
-                "Deep research requires Perplexity API key",
-                "Please configure PERPLEXITY_API_KEY in your .env file",
-                "please check you perplexity api key credits"
-            ],
-            "sources": []
+            "summary": "",
+            "findings": [],
+            "sources": [],
+            "api_error": {
+                "service": "Perplexity",
+                "reason": reason
+            }
         }

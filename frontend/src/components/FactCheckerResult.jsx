@@ -3,6 +3,28 @@ import { motion, AnimatePresence } from 'framer-motion';
 export default function FactCheckerResult({ result }) {
   if (!result) return null;
 
+  const apiErrors = result.api_errors || [];
+
+  // If any API failed, show a clean server-down message
+  if (apiErrors.length > 0) {
+    return (
+      <AnimatePresence mode="wait">
+        <motion.div
+          className="result"
+          initial={{ opacity: 0, y: 50 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.4 }}
+          style={{ textAlign: 'center', padding: '2rem' }}
+        >
+          <p style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>⚠️</p>
+          <h2 style={{ marginBottom: '0.5rem' }}>API Server is Down</h2>
+          <p style={{ color: '#888', fontSize: '0.95em' }}>Please try again later.</p>
+        </motion.div>
+      </AnimatePresence>
+    );
+  }
+
   // Handle both old and new response formats
   const status = result.status || result.verdict || 'Unknown';
   const claim = result.claim_text || '';

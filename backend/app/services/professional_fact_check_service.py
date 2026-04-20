@@ -764,15 +764,17 @@ VERIFIED_SOURCES:
                 if attempt == max_retries - 1:
                     return {
                         "status": "⚠️ Unverified",
-                        "explanation": f"Unable to generate verdict. {error_msg}",
-                        "sources": research_data.get("sources", [])
+                        "explanation": "Verdict could not be generated due to a service error.",
+                        "sources": research_data.get("sources", []),
+                        "api_error": {"service": "Gemini", "reason": error_msg}
                     }
 
         # Fallback if all retries failed
         return {
             "status": "⚠️ Unverified",
-            "explanation": f"Unable to generate verdict after {max_retries} attempts. Please try again later.",
-            "sources": research_data.get("sources", [])
+            "explanation": "Verdict could not be generated. Please try again later.",
+            "sources": research_data.get("sources", []),
+            "api_error": {"service": "Gemini", "reason": f"Failed after {max_retries} attempts"}
         }
 
     def _assess_perplexity_relevance(self, research_data: dict) -> bool:
@@ -993,6 +995,18 @@ VERIFIED_SOURCES:
             if perplexity_findings and perplexity_relevant:
                 final_findings = [self._translate_to_tamil(f) for f in final_findings]
 
+        # Collect API errors from each service
+        api_errors = []
+        perplexity_error = research_data.get("api_error")
+        if perplexity_error:
+            api_errors.append(perplexity_error)
+        x_error = x_analysis_data.get("error") if x_analysis_data else None
+        if x_error:
+            api_errors.append({"service": "X (Twitter)", "reason": str(x_error)})
+        gemini_error = verdict.get("api_error")
+        if gemini_error:
+            api_errors.append(gemini_error)
+
         response = {
             "claim_text": claim_text,
             "status": verdict.get("status", "⚠️ Unverified"),
@@ -1001,6 +1015,9 @@ VERIFIED_SOURCES:
             "findings": final_findings,
             "research_limitations": research_data.get("research_limitations", "")
         }
+
+        if api_errors:
+            response["api_errors"] = api_errors
 
         # Only include research_summary when Perplexity returned relevant results
         if perplexity_relevant:
